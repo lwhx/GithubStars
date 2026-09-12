@@ -145,9 +145,12 @@ guarantee for the v2 backend/electron split.
 
 ### Infrastructure vs business service — the import carve-out
 
-`no-restricted-imports` (PR 9) bans `src/components/**` from importing these **business services**:
-`githubApi`, `aiService`, `aiAnalysisHelper`, `aiAnalysisOptimizer`, `vectorSearchService`,
-`autoSync`, `webdavService`, `backendAdapter`, `rpcDownloadService`, `githubApiFactory`.
+`no-restricted-imports` (PR 9) bans View components — `src/components/**` and, since the
+placement rules above, `src/features/*/components/**` — from importing these **business
+services**: `githubApi`, `aiService`, `aiAnalysisHelper`, `aiAnalysisOptimizer`,
+`vectorSearchService`, `autoSync`, `webdavService`, `backendAdapter`, `rpcDownloadService`,
+`githubApiFactory`, `updateService`, `translateService`. The same list is mirrored in
+`scripts/check-boundaries.cjs`; keep the two in sync.
 
 These remain importable from components because they are **tools, not orchestration**:
 `logger`, `electronProxy` (`isElectron`), `indexedDbStorage`, `mcpElectronBridge`,
@@ -157,12 +160,11 @@ These remain importable from components because they are **tools, not orchestrat
 > a business service and belongs behind a hook. If it is a sync utility (`logger`, `isElectron`,
 > `indexedDBStorage`), it is infrastructure and may be imported anywhere.
 
-This PR's ban list is the ten services above. Two further services — `updateService` and
-`translateService` — are business services by the same rule (they make remote calls) but are
-*not* banned in this PR; `BilingualMarkdownRenderer`, `UpdateChecker`, and
-`UpdateNotificationBanner` still import them directly. They are phased out alongside the
-component tail below. The ban list is deliberately the set the migration already covered;
-expanding it is a follow-up PR, not this one.
+When this ADR landed, the ban list was the first ten services above; `updateService` and
+`translateService` (business services by the same rule — they make remote calls) were left
+unbanned because `BilingualMarkdownRenderer`, `UpdateChecker`, and `UpdateNotificationBanner`
+still imported them directly. That phase is complete: PR #326 migrated the last three
+components and folded both services into the ban list, and the allowlist no longer exists.
 
 ### Phased enforcement
 
@@ -181,6 +183,8 @@ would light up a dozen files at once and force a rushed migration in a boundary-
 "don't mask 33 violations in one go" failure mode. The allowlist is the phasing mechanism; each
 later PR that migrates a tail component also removes it from the allowlist.
 
+*(Completed: the tail was migrated and the allowlist retired in PR #326.)*
+
 ## Consequences
 
 - New components in migrated directories that try to import a business service fail lint **and**
@@ -190,14 +194,12 @@ later PR that migrates a tail component also removes it from the allowlist.
 - A `use*.ts(x)` module placed at a feature's root directory fails the `check-boundaries.cjs`
   CI step.
 - A reviewer can point at this ADR instead of re-arguing the layering on every PR.
-- The allowlist is technical debt with an expiration date: each entry is a component that still
-  needs its operations lifted into a `src/features/*/hooks/*` hook.
+
+*(The allowlist-as-technical-debt mechanism described in the original decision ran its course:
+PR #326 migrated the tail and emptied the allowlist, so no entries remain.)*
 
 ## Open issues / follow-up
 
-- Migrate the allowlist tail components into hooks, one feature per PR, removing each from the
-  allowlist as it lands. This ADR does not schedule that work; it only forbids *new* direct
-  imports.
 - `src/features/discovery/hooks/useDiscoveryRepoActions.ts` imports
   `src/features/repositories/application/discoveryRepoPatches` — a sideways import into a
   sibling feature's internals (forbidden by the Decision above, not yet enforced by any tool).

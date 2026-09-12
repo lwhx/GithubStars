@@ -248,6 +248,11 @@ export interface AppActions {
   setTrendingTimeRange: (range: TrendingTimeRange) => void;
   setWeeklyOnlyCollected: (only: boolean) => void;
   setWeeklySyncStatus: (status: WeeklySyncStatus | null) => void;
+  setXTweetSyncStatus: (status: WeeklySyncStatus | null) => void;
+  /** 添加 X 推文频道关注（接受 @handle / handle / x.com 链接，重复添加忽略） */
+  addXTweetFollow: (handle: string) => void;
+  removeXTweetFollow: (handle: string) => void;
+  setXTweetFeedBaseUrl: (url: string) => void;
   appendDiscoveryRepos: (channel: DiscoveryChannelId, repos: DiscoveryRepo[]) => void;
 }
 

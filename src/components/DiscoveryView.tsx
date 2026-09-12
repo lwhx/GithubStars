@@ -14,9 +14,10 @@ import {
   Globe,
   X,
   Calendar,
-  Newspaper
+  Newspaper,
+  Users
 } from 'lucide-react';
-import { SiAndroid, SiApple, SiLinux } from '@icons-pack/react-simple-icons';
+import { SiAndroid, SiApple, SiLinux, SiX } from '@icons-pack/react-simple-icons';
 import { SiWindows } from './SiWindows';
 import { useAppStore } from '../store/useAppStore';
 import { useDiscoveryActions } from '../features/discovery/hooks/useDiscoveryActions';
@@ -25,6 +26,7 @@ import { SubscriptionRepoCard } from './SubscriptionRepoCard';
 import { CodeSearchView } from './CodeSearchView';
 import { SortAlgorithmTooltip } from './SortAlgorithmTooltip';
 import { ScrollToBottom } from './ScrollToBottom';
+import { XTweetSettingsModal } from './XTweetSettingsModal';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from './ui/dropdown-menu';
@@ -44,6 +46,7 @@ const discoveryChannelIconMap: Record<DiscoveryChannelIcon, React.ReactNode> = {
   rocket: <Rocket className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
   star: <Crown className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
   tag: <Tag className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
+  tweet: <SiX className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
   weekly: <Newspaper className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
   search: <Search className="w-4 h-4 text-muted-foreground dark:text-muted-foreground" />,
 };
@@ -68,6 +71,11 @@ const discoveryChannelStyleMap: Record<DiscoveryChannelIcon, { gradient: string;
     gradient: 'from-muted to-muted/60 dark:from-muted/40 dark:to-muted/20',
     shadow: 'shadow-subtle',
     largeIcon: <Tag className="w-9 h-9 text-muted-foreground dark:text-foreground" />,
+  },
+  tweet: {
+    gradient: 'from-muted to-muted/60 dark:from-muted/40 dark:to-muted/20',
+    shadow: 'shadow-subtle',
+    largeIcon: <SiX className="w-9 h-9 text-muted-foreground dark:text-foreground" />,
   },
   weekly: {
     gradient: 'from-muted to-muted/60 dark:from-muted/40 dark:to-muted/20',
@@ -452,6 +460,8 @@ export const DiscoveryView: React.FC = React.memo(() => {
     weeklyOnlyCollected,
     setWeeklyOnlyCollected,
     weeklySyncStatus,
+    xTweetFollows,
+    xTweetSyncStatus,
     t,
     isAnalyzing,
     refreshChannel,
@@ -462,6 +472,8 @@ export const DiscoveryView: React.FC = React.memo(() => {
   const [searchInput, setSearchInput] = useState(discoverySearchQuery);
   
   const sidebarRef = useRef<HTMLDivElement>(null);
+  // X 推文频道：关注列表设置弹窗
+  const [tweetSettingsOpen, setTweetSettingsOpen] = useState(false);
   // 工具栏显示状态
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -505,6 +517,12 @@ export const DiscoveryView: React.FC = React.memo(() => {
       ? t(`正在同步周刊投稿… 已扫描 ${weeklySyncStatus.current} 条`, `Syncing weekly submissions… ${weeklySyncStatus.current} scanned`)
       : t(`补全仓库详情… ${weeklySyncStatus.current}/${weeklySyncStatus.total}`, `Fetching repo details… ${weeklySyncStatus.current}/${weeklySyncStatus.total}`))
     : null;
+  // X 推文同步/补全进度文案
+  const xTweetStatusText = xTweetSyncStatus
+    ? (xTweetSyncStatus.phase === 'syncing'
+      ? t(`正在拉取关注博主的时间线… ${xTweetSyncStatus.current}/${xTweetSyncStatus.total}`, `Fetching timelines… ${xTweetSyncStatus.current}/${xTweetSyncStatus.total}`)
+      : t(`补全仓库详情… ${xTweetSyncStatus.current}/${xTweetSyncStatus.total}`, `Fetching repo details… ${xTweetSyncStatus.current}/${xTweetSyncStatus.total}`))
+    : null;
 
 
 
@@ -540,6 +558,18 @@ export const DiscoveryView: React.FC = React.memo(() => {
       refreshChannel('weekly', 1, false);
     }
   }, [weeklyOnlyCollected, selectedDiscoveryChannel, refreshChannel]);
+
+  // X 推文关注列表变化时重建列表：只在关注集真正变化时触发（挂载/切频道不触发，
+  // 避免与空频道自动加载 effect 双重调用导致同步被中止重启）
+  const xTweetFollowsSignature = xTweetFollows.map(follow => follow.handle.toLowerCase()).sort().join(',');
+  const prevXTweetFollowsRef = useRef(xTweetFollowsSignature);
+  useEffect(() => {
+    if (prevXTweetFollowsRef.current === xTweetFollowsSignature) return;
+    prevXTweetFollowsRef.current = xTweetFollowsSignature;
+    if (selectedDiscoveryChannel === 'x-tweet') {
+      refreshChannel('x-tweet', 1, false);
+    }
+  }, [xTweetFollowsSignature, selectedDiscoveryChannel, refreshChannel]);
 
   // 主题改变时刷新数据
   useEffect(() => {
@@ -796,8 +826,25 @@ export const DiscoveryView: React.FC = React.memo(() => {
                     {weeklyStatusText}
                   </span>
                 )}
+                {selectedDiscoveryChannel === 'x-tweet' && xTweetStatusText && (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground dark:text-muted-foreground" aria-live="polite">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {xTweetStatusText}
+                  </span>
+                )}
+                {selectedDiscoveryChannel === 'x-tweet' && (
+                  <button
+                    type="button"
+                    onClick={() => setTweetSettingsOpen(true)}
+                    className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium border transition-colors bg-muted/50 text-muted-foreground border-transparent hover:bg-accent hover:text-accent-foreground"
+                    title={t('管理关注博主列表', 'Manage the follow list')}
+                  >
+                    <Users className="w-4 h-4" />
+                    {t('关注列表', 'Follow List')}
+                  </button>
+                )}
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {selectedDiscoveryChannel !== 'weekly' && (
+                  {selectedDiscoveryChannel !== 'weekly' && selectedDiscoveryChannel !== 'x-tweet' && (
                     <PlatformFilter
                       platform={discoveryPlatform}
                       onPlatformChange={setDiscoveryPlatform}
@@ -988,6 +1035,48 @@ export const DiscoveryView: React.FC = React.memo(() => {
                       </p>
                     </div>
                   </>
+                ) : selectedDiscoveryChannel === 'x-tweet' ? (
+                  <>
+                    {isDesktopSafeMode ? (
+                      <div className="w-16 h-16 rounded-2xl bg-muted dark:bg-card flex items-center justify-center text-muted-foreground dark:text-muted-foreground border border-border dark:border-border">
+                        {currentChannelIconNode}
+                      </div>
+                    ) : (
+                      <div className={`w-20 h-20 rounded-3xl bg-gradient-to-br ${currentChannelStyle.gradient} flex items-center justify-center shadow-md ${currentChannelStyle.shadow}`}>
+                        {currentChannelStyle.largeIcon}
+                      </div>
+                    )}
+                    <div className="space-y-2 max-w-xs">
+                      <p className="text-muted-foreground dark:text-muted-foreground font-medium text-base">
+                        {t('X 推文', 'X Tweets')}
+                      </p>
+                      <p className="text-sm text-muted-foreground dark:text-muted-foreground leading-relaxed">
+                        {t('增量拉取关注博主推文中的 GitHub 项目，加载更多时获取更早的推文', 'Incrementally pulls GitHub projects shared in followed accounts\' tweets; earlier tweets load as you page')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <Button
+                        variant="default"
+                        onClick={() => refreshChannel('x-tweet', 1, false)}
+                        disabled={currentIsLoading}
+                        className={isDesktopSafeMode
+                          ? 'flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90'
+                          : 'flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90'}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        {t('开始同步', 'Start Sync')}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setTweetSettingsOpen(true)}
+                        disabled={currentIsLoading}
+                        className="flex items-center gap-2 rounded-xl border border-border dark:border-border bg-card dark:bg-muted/40 px-6 py-2.5 text-sm font-medium text-foreground dark:text-foreground transition-colors hover:bg-accent dark:hover:bg-accent"
+                      >
+                        <Users className="w-4 h-4" />
+                        {t('关注列表', 'Follow List')}
+                      </Button>
+                    </div>
+                  </>
                 ) : selectedDiscoveryChannel === 'weekly' ? (
                   <>
                     {isDesktopSafeMode ? (
@@ -1125,6 +1214,11 @@ export const DiscoveryView: React.FC = React.memo(() => {
 
           {/* 滚动到底部按钮 */}
           <ScrollToBottom scrollContainerRef={scrollContainerRef} />
+
+          {/* X 推文频道关注列表设置 */}
+          <XTweetSettingsModal
+            isOpen={tweetSettingsOpen}
+            onClose={() => setTweetSettingsOpen(false)} />
         </div>
       </div>
     </div>

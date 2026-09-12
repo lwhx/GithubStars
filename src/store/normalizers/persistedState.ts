@@ -9,6 +9,7 @@ import type {
 import { defaultHeaderMenuConfig, defaultSubscriptionChannels } from '../../types';
 import { DEFAULT_THEME_PRESET_ID, isThemePresetId } from '../../constants/themePresets';
 import { normalizeReleaseSourceSettings } from '../../utils/releaseSources';
+import { normalizeXTweetFeedBaseUrl, normalizeXTweetFollows } from '../../utils/xTweetFollows';
 import type { AppStoreState } from '../types';
 import { readAuthMirror } from '../persistence/authStorage';
 import {
@@ -198,21 +199,23 @@ export const normalizePersistedState = (
     })(),
     // discoveryRepos is session-only runtime data. Never revive a stale legacy
     // cache during hydration, even if a historical snapshot contains the field.
-    discoveryRepos: { 'trending': [], 'hot-release': [], 'most-popular': [], 'topic': [], 'weekly': [], 'search': [], 'code-search': [] } as Record<DiscoveryChannelId, DiscoveryRepo[]>,
-    discoveryLastRefresh: { 'trending': null, 'hot-release': null, 'most-popular': null, 'topic': null, 'weekly': null, 'search': null, 'code-search': null },
-    discoveryTotalCount: { 'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'weekly': 0, 'search': 0, 'code-search': 0 },
+    discoveryRepos: { 'trending': [], 'hot-release': [], 'most-popular': [], 'topic': [], 'x-tweet': [], 'weekly': [], 'search': [], 'code-search': [] } as Record<DiscoveryChannelId, DiscoveryRepo[]>,
+    discoveryLastRefresh: { 'trending': null, 'hot-release': null, 'most-popular': null, 'topic': null, 'x-tweet': null, 'weekly': null, 'search': null, 'code-search': null },
+    discoveryTotalCount: { 'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'x-tweet': 0, 'weekly': 0, 'search': 0, 'code-search': 0 },
     selectedDiscoveryChannel: defaultDiscoveryChannelIds.has(safePersisted.selectedDiscoveryChannel as DiscoveryChannelId)
       ? safePersisted.selectedDiscoveryChannel as DiscoveryChannelId
       : 'trending',
     // discoveryIsLoading 不持久化，始终重置为 false（防止旧数据格式异常）
-    discoveryIsLoading: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'weekly': false, 'search': false, 'code-search': false },
-    discoveryIsLoadingMore: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'weekly': false, 'search': false, 'code-search': false },
-    discoveryLoadMoreError: { 'trending': null, 'hot-release': null, 'most-popular': null, 'topic': null, 'weekly': null, 'search': null, 'code-search': null },
-    discoveryHasMore: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'weekly': false, 'search': false, 'code-search': false },
-    discoveryNextPage: { 'trending': 1, 'hot-release': 1, 'most-popular': 1, 'topic': 1, 'weekly': 1, 'search': 1, 'code-search': 1 },
+    discoveryIsLoading: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'x-tweet': false, 'weekly': false, 'search': false, 'code-search': false },
+    discoveryIsLoadingMore: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'x-tweet': false, 'weekly': false, 'search': false, 'code-search': false },
+    discoveryLoadMoreError: { 'trending': null, 'hot-release': null, 'most-popular': null, 'topic': null, 'x-tweet': null, 'weekly': null, 'search': null, 'code-search': null },
+    discoveryHasMore: { 'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'x-tweet': false, 'weekly': false, 'search': false, 'code-search': false },
+    discoveryNextPage: { 'trending': 1, 'hot-release': 1, 'most-popular': 1, 'topic': 1, 'x-tweet': 1, 'weekly': 1, 'search': 1, 'code-search': 1 },
     // discoveryScrollPositions 不持久化，始终重置为 0
-    discoveryScrollPositions: { 'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'weekly': 0, 'search': 0, 'code-search': 0 },
+    discoveryScrollPositions: { 'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'x-tweet': 0, 'weekly': 0, 'search': 0, 'code-search': 0 },
   trendingTimeRange: 'weekly' as TrendingTimeRange,
+    xTweetFollows: normalizeXTweetFollows(safePersisted.xTweetFollows),
+    xTweetFeedBaseUrl: normalizeXTweetFeedBaseUrl(safePersisted.xTweetFeedBaseUrl),
     // 确保 subscription 相关状态包含 trending 键
     subscriptionRepos: {
       'most-stars': [],

@@ -161,4 +161,11 @@ export const selectDiscoveryViewState = (state: AppStoreState) => ({
   weeklyOnlyCollected: state.weeklyOnlyCollected,
   weeklySyncStatus: state.weeklySyncStatus,
   setWeeklyOnlyCollected: state.setWeeklyOnlyCollected,
+  xTweetFollows: state.xTweetFollows,
+  xTweetFeedBaseUrl: state.xTweetFeedBaseUrl,
+  xTweetSyncStatus: state.xTweetSyncStatus,
+  setXTweetSyncStatus: state.setXTweetSyncStatus,
+  addXTweetFollow: state.addXTweetFollow,
+  removeXTweetFollow: state.removeXTweetFollow,
+  setXTweetFeedBaseUrl: state.setXTweetFeedBaseUrl,
 });

@@ -455,3 +455,35 @@ describe('RepositoryCard touch-drag click suppression (CodeRabbit #355)', () => 
     expect(fireEvent.click(screen.getByTitle('在GitHub上查看'))).toBe(true);
   });
 });
+
+describe('RepositoryCard rapid touch drags (CodeRabbit round 2)', () => {
+  it('keeps suppressing the compatibility click when a second touch drag starts within 200ms', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = renderRepositoryCard('grid');
+      const card = container.firstElementChild as HTMLElement;
+      const handle = card.querySelector('[draggable="true"]') as HTMLElement;
+
+      const dragOnce = () => {
+        fireEvent.touchStart(handle, { touches: [{ clientX: 10, clientY: 10 }] });
+        fireEvent.touchMove(handle, { touches: [{ clientX: 60, clientY: 60 }] });
+        fireEvent.touchEnd(handle, { touches: [] });
+      };
+
+      dragOnce();
+      // 第二次拖拽开始时，第一次的复位定时器尚未触发
+      vi.advanceTimersByTime(100);
+      dragOnce();
+      // 推进越过第一次定时器的原定触发点：不得提前清掉第二次的抑制标志
+      vi.advanceTimersByTime(120);
+      expect(fireEvent.click(card)).toBe(false);
+      expect(screen.queryByTestId('readme-modal')).not.toBeInTheDocument();
+
+      // 抑制窗口正常过期后恢复
+      vi.advanceTimersByTime(200);
+      expect(fireEvent.click(card)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

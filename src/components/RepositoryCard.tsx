@@ -256,6 +256,9 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
       if (dragHintTimeoutRef.current) {
         clearTimeout(dragHintTimeoutRef.current);
       }
+      if (touchSuppressTimeoutRef.current) {
+        clearTimeout(touchSuppressTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -468,6 +471,7 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
   const dragHandleRef = useRef<HTMLDivElement>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const isTouchDraggingRef = useRef(false);
+  const touchSuppressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('application/x-gsm-repository-id', String(repository.id));
@@ -513,6 +517,11 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
     const touch = event.touches[0];
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
     isTouchDraggingRef.current = false;
+    // 取消上一次拖拽的抑制定时器，避免其在本次拖拽的抑制窗口内提前清位
+    if (touchSuppressTimeoutRef.current) {
+      clearTimeout(touchSuppressTimeoutRef.current);
+      touchSuppressTimeoutRef.current = null;
+    }
   };
 
   const handleTouchMove = (event: React.TouchEvent) => {
@@ -533,9 +542,13 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
       // 触摸拖拽后的兼容鼠标事件序列（touchend → mousemove → click）会让
       // dragStore 的 document 级 mousemove 兜底立即清位，因此触摸拖拽不能
       // 走全局拖拽状态；用实例级标志独立抑制 200ms 内补发的 click。
-      // 期间新触摸由 handleTouchStart 重置，不受残留影响。
-      setTimeout(() => {
+      // 重启窗口前先取消旧定时器，防止连续快速拖拽时旧定时器提前清位。
+      if (touchSuppressTimeoutRef.current) {
+        clearTimeout(touchSuppressTimeoutRef.current);
+      }
+      touchSuppressTimeoutRef.current = setTimeout(() => {
         isTouchDraggingRef.current = false;
+        touchSuppressTimeoutRef.current = null;
       }, 200);
     }
     touchStartPosRef.current = null;

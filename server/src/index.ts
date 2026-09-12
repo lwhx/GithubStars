@@ -17,6 +17,7 @@ import configsRouter from './routes/configs.js';
 import syncRouter from './routes/sync.js';
 import authRestoreRouter from './routes/authRestore.js';
 import proxyRouter from './routes/proxy.js';
+import xtweetRouter from './routes/xtweet.js';
 import logsRouter from './routes/logs.js';
 import mcpAdminRouter from './routes/mcp.js';
 import { mountMcpRoutes } from './mcp/http.js';
@@ -67,6 +68,7 @@ export function createApp(): express.Express {
 
   // Wave 3: Proxy routes
   app.use(proxyRouter);
+  app.use(xtweetRouter);
 
   // Wave 4: Logs route
   app.use(logsRouter);

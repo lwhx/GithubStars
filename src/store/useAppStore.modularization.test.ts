@@ -113,6 +113,7 @@ const currentPersistedKeys = [
   'discoverySortOrder',
   'discoverySelectedTopic',
   'weeklyOnlyCollected',
+  'xTweetFollows',
   'proxyConfig',
   'rpcDownloadConfig',
   'routeMode',
@@ -168,7 +169,7 @@ describe('PR-07 Store modularization compatibility', () => {
       rpcDownloadConfig: { enabled: true, host: 'rpc.example.com', port: 6800, secret: 'rpc-secret' },
     });
 
-    expect(options.version).toBe(14);
+    expect(options.version).toBe(15);
     expect(Object.keys(persisted)).toEqual(currentPersistedKeys);
     expect(persisted.analyzingGistIds).toEqual(['gist-1']);
     expect(persisted.proxyConfig).toMatchObject({ password: 'proxy-password' });
@@ -241,8 +242,8 @@ describe('PR-07 Store modularization compatibility', () => {
     const normalized = actualStore.normalizePersistedState(snapshot, actualStore.useAppStore.getInitialState());
 
     expect(normalized.analyzingGistIds).toEqual(new Set());
-    expect(normalized.discoveryRepos).toEqual({ trending: [], 'hot-release': [], 'most-popular': [], topic: [], weekly: [], search: [], 'code-search': [] });
-    expect(normalized.discoveryIsLoading).toEqual({ trending: false, 'hot-release': false, 'most-popular': false, topic: false, weekly: false, search: false, 'code-search': false });
+    expect(normalized.discoveryRepos).toEqual({ trending: [], 'hot-release': [], 'most-popular': [], topic: [], 'x-tweet': [], weekly: [], search: [], 'code-search': [] });
+    expect(normalized.discoveryIsLoading).toEqual({ trending: false, 'hot-release': false, 'most-popular': false, topic: false, 'x-tweet': false, weekly: false, search: false, 'code-search': false });
     expect(normalized.repositories?.[0]).toMatchObject({
       has_fetched_releases: true,
       last_release_fetch_time: '2026-02-01T00:00:00.000Z',

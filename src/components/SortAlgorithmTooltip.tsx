@@ -69,6 +69,15 @@ export const SortAlgorithmTooltip: React.FC<SortAlgorithmTooltipProps> = ({ chan
             '【Features】\n• Source: open-source submission issues of ruanyf/weekly\n• Repo links extracted from issue bodies\n• Sort by: submission time descending\n• Filter by weekly-collected items\n\n【Best for】\nBrowsing open-source projects recommended through the weekly editorial lens.'
           ),
         };
+      case 'x-tweet':
+        return {
+          title: t('X 推文', 'X Tweets'),
+          highlight: t('🐦 关注博主推文中的开源项目', '🐦 Open-source projects shared by followed accounts'),
+          description: t(
+            '【特点】\n• 来源：关注博主推文中分享的仓库链接\n• 增量分页拉取，加载更多时获取更早的推文\n• 排序方式：按推文时间倒序\n\n【适合场景】\n跟踪技术圈博主实时推荐的新项目，发现一线开发者正在分享的工具与库。',
+            '【Features】\n• Source: repo links shared in followed accounts\' tweets\n• Incremental paginated fetching; earlier tweets load as you page\n• Sort by: tweet time descending\n\n【Best for】\nTracking real-time recommendations from tech accounts and discovering tools developers are sharing.'
+          ),
+        };
       case 'code-search':
         return {
           title: t('代码搜索', 'Code Search'),

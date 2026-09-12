@@ -6,7 +6,7 @@ import {
   FileCode2,
   Calendar,
   GitFork,
-  TrendingUp,
+  Compass,
   Settings,
   GripVertical,
   ChevronUp,
@@ -32,7 +32,7 @@ const MENU_META: Record<HeaderMenuId, {
   gists: { icon: FileCode2, labelZh: 'Gist', labelEn: 'Gist', canHide: true },
   releases: { icon: Calendar, labelZh: '发布', labelEn: 'Releases', canHide: true },
   forks: { icon: GitFork, labelZh: '复刻', labelEn: 'Forks', canHide: true },
-  subscription: { icon: TrendingUp, labelZh: '趋势', labelEn: 'Trending', canHide: true },
+  subscription: { icon: Compass, labelZh: '发现', labelEn: 'Discover', canHide: true },
   settings: { icon: Settings, labelZh: '设置', labelEn: 'Settings', canHide: false },
 };
 

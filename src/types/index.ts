@@ -547,6 +547,10 @@ export interface AppState {
   weeklyOnlyCollected: boolean;
   /** 周刊频道同步进度（会话级，不持久化） */
   weeklySyncStatus: WeeklySyncStatus | null;
+  /** X 推文频道：关注博主列表（handle 不含 @，初始化含 geekbb） */
+  xTweetFollows: XTweetFollow[];
+  /** X 推文频道同步/详情补全进度（会话级，不持久化） */
+  xTweetSyncStatus: WeeklySyncStatus | null;
 
   // Subscription
   subscriptionRepos: Record<string, SubscriptionRepo[]>;
@@ -613,9 +617,9 @@ export type SortBy = 'BestMatch' | 'MostStars' | 'MostForks';
 
 export type SortOrder = 'Descending' | 'Ascending';
 
-export type DiscoveryChannelId = 'trending' | 'hot-release' | 'most-popular' | 'topic' | 'weekly' | 'search' | 'code-search';
+export type DiscoveryChannelId = 'trending' | 'hot-release' | 'most-popular' | 'topic' | 'x-tweet' | 'weekly' | 'search' | 'code-search';
 
-export type DiscoveryChannelIcon = 'trending' | 'rocket' | 'star' | 'tag' | 'weekly' | 'search';
+export type DiscoveryChannelIcon = 'trending' | 'rocket' | 'star' | 'tag' | 'tweet' | 'weekly' | 'search';
 
 /** 阮一峰周刊频道：来源 issue 的引用信息（周刊收录 = labels 含 'weekly'） */
 export interface WeeklyIssueRef {
@@ -631,6 +635,25 @@ export interface WeeklySyncStatus {
   phase: 'syncing' | 'enriching';
   current: number;
   total: number;
+}
+
+/** X 推文频道：一条关注配置（handle 不含 @） */
+export interface XTweetFollow {
+  handle: string;
+  addedAt: string;
+}
+
+/** X 推文频道：仓库来源推文的引用信息（正文缓存供"查看原贴"离线渲染） */
+export interface XTweetRef {
+  tweetId: string;
+  /** 博主 handle（不含 @） */
+  handle: string;
+  displayName: string;
+  /** 推文正文（RSS 输出的 HTML 片段） */
+  content: string;
+  /** 推文链接（https://x.com/<handle>/status/<id>） */
+  html_url: string;
+  createdAt: string;
 }
 
 export interface DiscoveryChannel {
@@ -655,6 +678,8 @@ export interface DiscoveryRepo extends Repository {
   platform: DiscoveryPlatform;
   /** 仅 weekly 频道：该仓库对应的周刊投稿 issue */
   weeklyIssue?: WeeklyIssueRef;
+  /** 仅 x-tweet 频道：该仓库来源的推文 */
+  xTweet?: XTweetRef;
 }
 
 export type TrendingTimeRange = 'daily' | 'weekly' | 'monthly';

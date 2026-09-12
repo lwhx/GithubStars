@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, shell, globalShortcut, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, shell, globalShortcut, ipcMain, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -288,6 +288,31 @@ async function applyProxy(config) {
     console.log('[Proxy] Disabled, using direct connection');
   }
 }
+
+// X 推文频道：主进程代抓 x.com 未登录主页（渲染进程受 CORS 限制无法直连；
+// net.fetch 走 Chromium 网络栈，自动跟随应用内已设置的代理）
+ipcMain.handle('x-fetch-timeline', async (_event, handle) => {
+  if (typeof handle !== 'string' || !/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+    return { success: false, error: 'invalid handle' };
+  }
+  try {
+    const response = await net.fetch(`https://x.com/${handle}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      return { success: false, error: `x.com responded ${response.status}` };
+    }
+    const html = await response.text();
+    return { success: true, html };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
 
 ipcMain.handle('set-proxy', async (event, config) => {
   saveProxyConfig(config);

@@ -5,6 +5,7 @@ import { defaultHeaderMenuConfig, defaultReleaseSourceSettings, defaultSubscript
 import { defaultRepositoryChatSettings } from '../../types/repositoryChat';
 import { logger } from '../../services/logger';
 import { normalizeReleaseSourceSettings } from '../../utils/releaseSources';
+import { normalizeXTweetFollows } from '../../utils/xTweetFollows';
 import type { AppStoreState } from '../types';
 import {
   defaultDiscoveryChannels,
@@ -20,7 +21,7 @@ import { debouncedPersistStorage } from './storage';
 
 export const appPersistenceOptions: PersistOptions<AppStoreState, PersistedAppState> = {
   name: 'github-stars-manager',
-  version: 14,
+  version: 15,
   storage: debouncedPersistStorage as PersistStorage<PersistedAppState>,
 partialize: (state) => ({
   // 持久化用户信息和认证状态
@@ -147,6 +148,7 @@ discoverySortBy: state.discoverySortBy,
 discoverySortOrder: state.discoverySortOrder,
 discoverySelectedTopic: state.discoverySelectedTopic,
 weeklyOnlyCollected: state.weeklyOnlyCollected,
+xTweetFollows: state.xTweetFollows,
 // 持久化完整代理配置，包含认证密码，确保重启后无需重新输入。
 proxyConfig: {
   enabled: state.proxyConfig.enabled,
@@ -300,17 +302,24 @@ state.discoverySortOrder = 'Descending';
   // discoveryIsLoading 不应持久化，migrate 时始终重置防止旧数据格式异常导致 spread 崩溃
   if (state) {
 (state as Record<string, unknown>).discoveryIsLoading = {
-'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'weekly': false, 'search': false, 'code-search': false,
+'trending': false, 'hot-release': false, 'most-popular': false, 'topic': false, 'x-tweet': false, 'weekly': false, 'search': false, 'code-search': false,
 };
 // discoveryScrollPositions 同样不应持久化，重置以避免 stale 滚动位置
 (state as Record<string, unknown>).discoveryScrollPositions = {
-'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'weekly': 0, 'search': 0, 'code-search': 0,
+'trending': 0, 'hot-release': 0, 'most-popular': 0, 'topic': 0, 'x-tweet': 0, 'weekly': 0, 'search': 0, 'code-search': 0,
 };
   }
 
   // v14: 周刊频道过滤器偏好兜底
   if (state && typeof (state as Record<string, unknown>).weeklyOnlyCollected !== 'boolean') {
     (state as Record<string, unknown>).weeklyOnlyCollected = false;
+  }
+
+  // v14→v15: X 推文频道选项兜底（关注列表默认含 geekbb）
+  if (state) {
+    (state as Record<string, unknown>).xTweetFollows = normalizeXTweetFollows(
+      (state as Record<string, unknown>).xTweetFollows,
+    );
   }
 
   // v5→v6: 初始化 proxyConfig

@@ -110,6 +110,7 @@ export type PersistedAppState = Partial<
     | 'discoverySortOrder'
     | 'discoverySelectedTopic'
     | 'weeklyOnlyCollected'
+    | 'xTweetFollows'
     | 'proxyConfig'
     | 'rpcDownloadConfig'
     | 'routeMode'
@@ -478,6 +479,14 @@ export const defaultDiscoveryChannels: DiscoveryChannel[] = [
     nameEn: 'Topic',
     icon: 'tag',
     description: '按主题分类浏览仓库',
+    enabled: true,
+  },
+  {
+    id: 'x-tweet',
+    name: 'X 推文',
+    nameEn: 'X Tweets',
+    icon: 'tweet',
+    description: '关注 X 博主推文中分享的 GitHub 项目',
     enabled: true,
   },
   {

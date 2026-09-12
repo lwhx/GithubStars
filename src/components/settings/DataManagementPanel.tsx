@@ -2,6 +2,7 @@ import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { weeklyIssuesStorage } from '../../services/weeklyIssuesStorage';
+import { xTweetStorage } from '../../services/xTweetStorage';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -483,13 +484,15 @@ export const DataManagementPanel: React.FC<DataManagementPanelProps> = ({ t }) =
 
   const deleteDiscoveryData = useCallback(async () => {
     try {
-      // 周刊频道数据在独立 IndexedDB（issues/repos/正文缓存），一并清空
+      // 周刊/推文频道数据在独立 IndexedDB，一并清空
       await weeklyIssuesStorage.clearAll();
+      await xTweetStorage.clearAll();
       const emptyDiscoveryRepos = {
         'trending': [],
         'hot-release': [],
         'most-popular': [],
         'topic': [],
+        'x-tweet': [],
         'weekly': [],
         'search': [],
         'code-search': []
@@ -501,6 +504,7 @@ export const DataManagementPanel: React.FC<DataManagementPanelProps> = ({ t }) =
           'hot-release': null,
           'most-popular': null,
           'topic': null,
+          'x-tweet': null,
           'weekly': null,
           'search': null,
           'code-search': null
@@ -1221,11 +1225,17 @@ export const DataManagementPanel: React.FC<DataManagementPanelProps> = ({ t }) =
         pendingStorages.push(t('主应用存储', 'app storage'));
         throw e;
       }
-      // 周刊频道数据在独立 IndexedDB（github-stars-weekly），一并清空
+      // 周刊/推文频道数据在独立 IndexedDB，一并清空
       try {
         await weeklyIssuesStorage.clearAll();
       } catch (e) {
         pendingStorages.push(t('周刊数据', 'weekly data'));
+        throw e;
+      }
+      try {
+        await xTweetStorage.clearAll();
+      } catch (e) {
+        pendingStorages.push(t('X 推文数据', 'X tweet data'));
         throw e;
       }
 

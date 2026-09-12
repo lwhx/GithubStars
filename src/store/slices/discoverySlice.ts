@@ -1,5 +1,6 @@
 
 import type { AppStoreSlice } from '../types';
+import { normalizeXTweetHandleInput } from '../../utils/xTweetFollows';
 
 export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActions,
   | 'setSelectedDiscoveryChannel'
@@ -23,6 +24,9 @@ export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActi
   | 'setTrendingTimeRange'
   | 'setWeeklyOnlyCollected'
   | 'setWeeklySyncStatus'
+  | 'setXTweetSyncStatus'
+  | 'addXTweetFollow'
+  | 'removeXTweetFollow'
   | 'appendDiscoveryRepos'
 >> = (set) => ({
     // Discovery actions
@@ -104,6 +108,23 @@ export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActi
     setTrendingTimeRange: (range) => set({ trendingTimeRange: range }),
     setWeeklyOnlyCollected: (only) => set({ weeklyOnlyCollected: only }),
     setWeeklySyncStatus: (status) => set({ weeklySyncStatus: status }),
+    setXTweetSyncStatus: (status) => set({ xTweetSyncStatus: status }),
+    addXTweetFollow: (handle) => set((state) => {
+      const normalized = normalizeXTweetHandleInput(handle);
+      if (!normalized) return {};
+      const exists = state.xTweetFollows.some(
+        (follow) => follow.handle.toLowerCase() === normalized.toLowerCase(),
+      );
+      if (exists) return {};
+      return {
+        xTweetFollows: [...state.xTweetFollows, { handle: normalized, addedAt: new Date().toISOString() }],
+      };
+    }),
+    removeXTweetFollow: (handle) => set((state) => ({
+      xTweetFollows: state.xTweetFollows.filter(
+        (follow) => follow.handle.toLowerCase() !== handle.toLowerCase(),
+      ),
+    })),
   setDiscoveryScrollPosition: (channel, position) => set((state) => ({
       discoveryScrollPositions: { ...state.discoveryScrollPositions, [channel]: position },
     })),

@@ -5,6 +5,7 @@ import { useAppStore } from '../../../store/useAppStore';
 import { selectDiscoveryViewState } from '../../../store/selectors';
 import { GitHubApiService } from '../../../services/githubApi';
 import { syncWeeklyChannel } from '../../../services/weeklyIssuesService';
+import { syncXTweetChannel } from '../../../services/xTweetService';
 import { AIService } from '../../../services/aiService';
 import { AIAnalysisOptimizer } from '../../../services/aiAnalysisOptimizer';
 import { discoveryAnalysisStorage } from '../../../services/discoveryAnalysisStorage';
@@ -21,6 +22,8 @@ const getChannelRequestSignature = (state: ReturnType<typeof selectDiscoveryView
     case 'search': return JSON.stringify([...common, state.discoverySearchQuery, state.discoveryLanguage, state.discoverySortBy, state.discoverySortOrder]);
     // 周刊过滤为客户端行为，但签名纳入 weeklyOnlyCollected 以便切换过滤器时重跑入口重建切片
     case 'weekly': return JSON.stringify([...common, state.weeklyOnlyCollected]);
+    // 关注列表变化会改变抓取范围，纳入签名作废旧请求
+    case 'x-tweet': return JSON.stringify([...common, state.xTweetFollows]);
     default: return JSON.stringify(common);
   }
 };
@@ -47,8 +50,9 @@ export const useDiscoveryActions = (scrollContainerRef: RefObject<HTMLDivElement
   useEffect(() => {
     setIsAnalyzing(false);
     setAnalysisProgress({ current: 0, total: 0 });
-    // 账号切换后旧会话的周刊同步进度不再属于当前页面，直接清空
+    // 账号切换后旧会话的周刊/推文同步进度不再属于当前页面，直接清空
     useAppStore.getState().setWeeklySyncStatus(null);
+    useAppStore.getState().setXTweetSyncStatus(null);
     return () => {
       optimizerRef.current?.abort();
       optimizerRef.current = null;
@@ -118,6 +122,19 @@ export const useDiscoveryActions = (scrollContainerRef: RefObject<HTMLDivElement
             },
           );
           break;
+        case 'x-tweet':
+          useAppStore.getState().setXTweetSyncStatus(null);
+          result = await syncXTweetChannel(
+            api,
+            page,
+            currentState.xTweetFollows,
+            (status) => {
+              if (isCurrentRequest()) {
+                useAppStore.getState().setXTweetSyncStatus(status);
+              }
+            },
+          );
+          break;
         default:
           result = { repos: [], hasMore: false, nextPageIndex: page + 1, totalCount: 0 };
       }
@@ -140,13 +157,16 @@ export const useDiscoveryActions = (scrollContainerRef: RefObject<HTMLDivElement
           analysis_error: analysis.analysis_error,
         } : newRepo;
       });
-      if (append) currentState.appendDiscoveryRepos(channelId, mergedRepos);
+      // x-tweet 每页返回累积前缀切片（服务按页整体重建窗口），加载更多时
+      // 用替换语义写入，否则加深拉取新增的卡片落进已消费窗口内永远补不到
+      const replacesOnAppend = channelId === 'x-tweet';
+      if (append && !replacesOnAppend) currentState.appendDiscoveryRepos(channelId, mergedRepos);
       else currentState.setDiscoveryRepos(channelId, mergedRepos);
       currentState.setDiscoveryHasMore(channelId, result.hasMore);
       currentState.setDiscoveryNextPage(channelId, result.nextPageIndex);
       if (result.totalCount !== undefined) currentState.setDiscoveryTotalCount(channelId, result.totalCount);
       currentState.setDiscoveryLastRefresh(channelId, new Date().toISOString());
-      if (append && scrollContainerRef.current) {
+      if (append && !replacesOnAppend && scrollContainerRef.current) {
         requestAnimationFrame(() => {
           const cards = scrollContainerRef.current?.querySelectorAll('[data-repo-index]');
           const target = cards?.[previousCount] as HTMLElement | undefined;
@@ -161,6 +181,9 @@ export const useDiscoveryActions = (scrollContainerRef: RefObject<HTMLDivElement
     } finally {
       if (channelId === 'weekly' && isCurrentRequest()) {
         useAppStore.getState().setWeeklySyncStatus(null);
+      }
+      if (channelId === 'x-tweet' && isCurrentRequest()) {
+        useAppStore.getState().setXTweetSyncStatus(null);
       }
       if (ownsLoading()) {
         if (append) currentState.setDiscoveryLoadingMore(channelId, false);

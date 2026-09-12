@@ -3,7 +3,7 @@ import { History, Search, Trash2 } from 'lucide-react';
 import type { Repository } from '../types';
 import type { RepositoryChatSession } from '../types/repositoryChat';
 import { useAppStore } from '../store/useAppStore';
-import { repositoryChatSessionRepository } from '../features/repository-chat/repositories/sessionRepository';
+import { repositoryChatStorage } from '../services/repositoryChatStorage';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
@@ -54,7 +54,7 @@ export const GlobalChatHistorySheet: React.FC<GlobalChatHistorySheetProps> = ({
     setIsLoading(true);
     setLoadError(null);
     try {
-      const nextSessions = await repositoryChatSessionRepository.listRecentSessions(50);
+      const nextSessions = await repositoryChatStorage.listRecentSessions(50);
       if (requestId !== requestIdRef.current) return;
       setSessions(nextSessions);
     } catch {
@@ -73,7 +73,7 @@ export const GlobalChatHistorySheet: React.FC<GlobalChatHistorySheetProps> = ({
   }, [isOpen, refresh]);
 
   const handleDelete = useCallback(async (sessionId: string) => {
-    await repositoryChatSessionRepository.permanentlyDeleteSession(sessionId);
+    await repositoryChatStorage.permanentlyDeleteSession(sessionId);
     setSessions((previous) => previous.filter((session) => session.id !== sessionId));
     window.dispatchEvent(new CustomEvent(HISTORY_CHANGE_EVENT));
   }, []);

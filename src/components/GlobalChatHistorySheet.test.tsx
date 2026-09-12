@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GlobalChatHistorySheet } from './GlobalChatHistorySheet';
-import { repositoryChatSessionRepository } from '../features/repository-chat/repositories/sessionRepository';
+import { repositoryChatStorage } from '../services/repositoryChatStorage';
 import type { Repository } from '../types';
 import type { RepositoryChatSession } from '../types/repositoryChat';
 
@@ -35,8 +35,8 @@ describe('GlobalChatHistorySheet', () => {
   });
 
   it('按更新时间倒序列出跨仓会话', async () => {
-    await repositoryChatSessionRepository.saveSession(createSession('older', 1, 'owner/repo-one', '2026-08-24T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('newer', 2, 'owner/repo-two', '2026-08-26T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('older', 1, 'owner/repo-one', '2026-08-24T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('newer', 2, 'owner/repo-two', '2026-08-26T00:00:00.000Z'));
 
     render(<GlobalChatHistorySheet isOpen repositories={repositories} onClose={() => {}} onSelectSession={() => {}} />);
 
@@ -48,8 +48,8 @@ describe('GlobalChatHistorySheet', () => {
   });
 
   it('按标题或仓库名过滤并进入对应仓库会话', async () => {
-    await repositoryChatSessionRepository.saveSession(createSession('s1', 1, 'owner/repo-one', '2026-08-24T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('s2', 2, 'owner/repo-two', '2026-08-26T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('s1', 1, 'owner/repo-one', '2026-08-24T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('s2', 2, 'owner/repo-two', '2026-08-26T00:00:00.000Z'));
     const onSelectSession = vi.fn();
 
     render(<GlobalChatHistorySheet isOpen repositories={repositories} onClose={() => {}} onSelectSession={onSelectSession} />);
@@ -62,7 +62,7 @@ describe('GlobalChatHistorySheet', () => {
     expect(onSelectSession).toHaveBeenCalledWith(repositories[1], 's2');
   });
 
-  it('删除会话后从列表移除', async () => {    await repositoryChatSessionRepository.saveSession(createSession('doomed', 1, 'owner/repo-one', '2026-08-26T00:00:00.000Z'));
+  it('删除会话后从列表移除', async () => {    await repositoryChatStorage.saveSession(createSession('doomed', 1, 'owner/repo-one', '2026-08-26T00:00:00.000Z'));
 
     render(<GlobalChatHistorySheet isOpen repositories={repositories} onClose={() => {}} onSelectSession={() => {}} />);
     await screen.findByTitle('进入 owner/repo-one 的会话');
@@ -75,7 +75,7 @@ describe('GlobalChatHistorySheet', () => {
   });
 
   it('读取失败时显示错误与重试，恢复后可重载', async () => {
-    const listSpy = vi.spyOn(repositoryChatSessionRepository, 'listRecentSessions');
+    const listSpy = vi.spyOn(repositoryChatStorage, 'listRecentSessions');
     listSpy.mockRejectedValueOnce(new Error('IndexedDB unavailable'));
 
     render(<GlobalChatHistorySheet isOpen repositories={repositories} onClose={() => {}} onSelectSession={() => {}} />);

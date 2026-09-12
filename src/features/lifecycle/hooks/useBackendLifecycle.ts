@@ -1,17 +1,17 @@
 import { useEffect } from 'react';
-import { backend } from '../../services/backendAdapter';
+import { backend } from '../../../services/backendAdapter';
 import {
   startAutoSync,
   stopAutoSync,
   syncFromBackend,
   syncLocalGitHubTokenToBackend,
   tryRestoreAuthFromBackend,
-} from '../../services/autoSync';
+} from '../../../services/autoSync';
 import {
   refreshMcpElectronBridge,
   startMcpElectronBridge,
   stopMcpElectronBridge,
-} from '../../services/mcpElectronBridge';
+} from '../../../services/mcpElectronBridge';
 
 /**
  * Owns application-wide backend and Electron MCP startup after Store hydration.

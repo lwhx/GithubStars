@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { repositoryChatSessionRepository } from './sessionRepository';
-import type { RepositoryChatMessage, RepositoryChatSession, RepositoryChatToolEvent, ToolEvidence } from '../../../types/repositoryChat';
+import { repositoryChatStorage } from './repositoryChatStorage';
+import type { RepositoryChatMessage, RepositoryChatSession, RepositoryChatToolEvent, ToolEvidence } from '../types/repositoryChat';
 
 const createSession = (id: string, repoId: number, updatedAt: string): RepositoryChatSession => ({
   id,
@@ -46,7 +46,7 @@ const createEvidence = (id: string): ToolEvidence => ({
   retrievedAt: '2026-08-26T00:00:00.000Z',
 });
 
-describe('repositoryChatSessionRepository local fallback', () => {
+describe('repositoryChatStorage local fallback', () => {
   const originalIndexedDb = Object.getOwnPropertyDescriptor(window, 'indexedDB');
   const originalLocalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
 
@@ -63,69 +63,69 @@ describe('repositoryChatSessionRepository local fallback', () => {
   });
 
   it('filters, orders, and soft-deletes sessions strictly within the selected repository', async () => {
-    await repositoryChatSessionRepository.saveSession(createSession('older', 1, '2026-08-24T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('other-repository', 2, '2026-08-26T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('newer', 1, '2026-08-25T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('older', 1, '2026-08-24T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('other-repository', 2, '2026-08-26T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('newer', 1, '2026-08-25T00:00:00.000Z'));
 
-    await expect(repositoryChatSessionRepository.listSessionsByRepository(1)).resolves.toMatchObject([
+    await expect(repositoryChatStorage.listSessionsByRepository(1)).resolves.toMatchObject([
       { id: 'newer', repoId: 1 },
       { id: 'older', repoId: 1 },
     ]);
 
-    await repositoryChatSessionRepository.softDeleteSession('newer');
-    await expect(repositoryChatSessionRepository.listSessionsByRepository(1)).resolves.toMatchObject([
+    await repositoryChatStorage.softDeleteSession('newer');
+    await expect(repositoryChatStorage.listSessionsByRepository(1)).resolves.toMatchObject([
       { id: 'older', repoId: 1 },
     ]);
-    await expect(repositoryChatSessionRepository.listSessionsByRepository(2)).resolves.toMatchObject([
+    await expect(repositoryChatStorage.listSessionsByRepository(2)).resolves.toMatchObject([
       { id: 'other-repository', repoId: 2 },
     ]);
   });
 
   it('purges expired sessions for the active repository while retaining current sessions', async () => {
-    await repositoryChatSessionRepository.saveSession(createSession('expired', 1, '2026-01-01T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('current', 1, new Date().toISOString()));
+    await repositoryChatStorage.saveSession(createSession('expired', 1, '2026-01-01T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('current', 1, new Date().toISOString()));
 
-    await repositoryChatSessionRepository.purgeExpiredSessions(1, 1);
+    await repositoryChatStorage.purgeExpiredSessions(1, 1);
 
-    await expect(repositoryChatSessionRepository.getSession('expired')).resolves.toBeNull();
-    await expect(repositoryChatSessionRepository.getSession('current')).resolves.toMatchObject({ id: 'current' });
+    await expect(repositoryChatStorage.getSession('expired')).resolves.toBeNull();
+    await expect(repositoryChatStorage.getSession('current')).resolves.toMatchObject({ id: 'current' });
   });
 
   it('physically deletes all messages, tool events, and evidence connected to the deleted session', async () => {
     const session = createSession('session-1', 1, '2026-08-26T00:00:00.000Z');
     const messageEvidence = createEvidence('message-evidence');
     const toolEvidence = createEvidence('tool-evidence');
-    await repositoryChatSessionRepository.saveSession(session);
-    await repositoryChatSessionRepository.saveMessage(createMessage('message-1', session.id, [messageEvidence.id]));
-    await repositoryChatSessionRepository.saveToolEvent(createToolEvent(session.id, toolEvidence.id));
-    await repositoryChatSessionRepository.saveEvidence(messageEvidence);
-    await repositoryChatSessionRepository.saveEvidence(toolEvidence);
+    await repositoryChatStorage.saveSession(session);
+    await repositoryChatStorage.saveMessage(createMessage('message-1', session.id, [messageEvidence.id]));
+    await repositoryChatStorage.saveToolEvent(createToolEvent(session.id, toolEvidence.id));
+    await repositoryChatStorage.saveEvidence(messageEvidence);
+    await repositoryChatStorage.saveEvidence(toolEvidence);
 
-    await repositoryChatSessionRepository.permanentlyDeleteSession(session.id);
+    await repositoryChatStorage.permanentlyDeleteSession(session.id);
 
-    await expect(repositoryChatSessionRepository.getSession(session.id)).resolves.toBeNull();
-    await expect(repositoryChatSessionRepository.listMessages(session.id)).resolves.toEqual([]);
-    await expect(repositoryChatSessionRepository.listToolEvents(session.id)).resolves.toEqual([]);
-    await expect(repositoryChatSessionRepository.listEvidence([messageEvidence.id, toolEvidence.id])).resolves.toEqual([]);
+    await expect(repositoryChatStorage.getSession(session.id)).resolves.toBeNull();
+    await expect(repositoryChatStorage.listMessages(session.id)).resolves.toEqual([]);
+    await expect(repositoryChatStorage.listToolEvents(session.id)).resolves.toEqual([]);
+    await expect(repositoryChatStorage.listEvidence([messageEvidence.id, toolEvidence.id])).resolves.toEqual([]);
   });
 
   it('lists recent sessions across repositories in recency order with a limit', async () => {
-    await repositoryChatSessionRepository.saveSession(createSession('repo1-older', 1, '2026-08-24T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('repo2-newer', 2, '2026-08-26T00:00:00.000Z'));
-    await repositoryChatSessionRepository.saveSession(createSession('repo1-middle', 1, '2026-08-25T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('repo1-older', 1, '2026-08-24T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('repo2-newer', 2, '2026-08-26T00:00:00.000Z'));
+    await repositoryChatStorage.saveSession(createSession('repo1-middle', 1, '2026-08-25T00:00:00.000Z'));
 
-    await expect(repositoryChatSessionRepository.listRecentSessions(2)).resolves.toMatchObject([
+    await expect(repositoryChatStorage.listRecentSessions(2)).resolves.toMatchObject([
       { id: 'repo2-newer', repoId: 2 },
       { id: 'repo1-middle', repoId: 1 },
     ]);
-    await expect(repositoryChatSessionRepository.listRecentSessions()).resolves.toMatchObject([
+    await expect(repositoryChatStorage.listRecentSessions()).resolves.toMatchObject([
       { id: 'repo2-newer', repoId: 2 },
       { id: 'repo1-middle', repoId: 1 },
       { id: 'repo1-older', repoId: 1 },
     ]);
 
-    await repositoryChatSessionRepository.softDeleteSession('repo2-newer');
-    await expect(repositoryChatSessionRepository.listRecentSessions()).resolves.toMatchObject([
+    await repositoryChatStorage.softDeleteSession('repo2-newer');
+    await expect(repositoryChatStorage.listRecentSessions()).resolves.toMatchObject([
       { id: 'repo1-middle', repoId: 1 },
       { id: 'repo1-older', repoId: 1 },
     ]);
@@ -145,7 +145,7 @@ describe('repositoryChatSessionRepository local fallback', () => {
     };
     Object.defineProperty(window, 'localStorage', { configurable: true, value: throwingStorage });
 
-    await expect(repositoryChatSessionRepository.saveSession(createSession('cannot-persist', 1, '2026-08-26T00:00:00.000Z')))
+    await expect(repositoryChatStorage.saveSession(createSession('cannot-persist', 1, '2026-08-26T00:00:00.000Z')))
       .rejects.toThrow('unable to persist fallback snapshot');
   });
 });

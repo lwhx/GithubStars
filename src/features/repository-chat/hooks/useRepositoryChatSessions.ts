@@ -3,7 +3,7 @@ import type { Repository } from '../../../types';
 import { useAppStore } from '../../../store/useAppStore';
 import { resolveRepositoryChatHeadSha } from '../../../services/repositoryChatService';
 import type { RepositoryChatMessage, RepositoryChatSession } from '../../../types/repositoryChat';
-import { repositoryChatSessionRepository } from '../repositories/sessionRepository';
+import { repositoryChatStorage } from '../../../services/repositoryChatStorage';
 
 const createId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -44,7 +44,7 @@ export const useRepositoryChatSessions = ({
       if (operationId === operationIdRef.current) setMessages([]);
       return;
     }
-    const nextMessages = await repositoryChatSessionRepository.listMessages(session.id);
+    const nextMessages = await repositoryChatStorage.listMessages(session.id);
     if (operationId === operationIdRef.current) setMessages(nextMessages);
   }, []);
 
@@ -60,8 +60,8 @@ export const useRepositoryChatSessions = ({
     setIsLoading(true);
     setError(null);
     try {
-      await repositoryChatSessionRepository.purgeExpiredSessions(repository.id, retainSessionDays);
-      const nextSessions = await repositoryChatSessionRepository.listSessionsByRepository(repository.id);
+      await repositoryChatStorage.purgeExpiredSessions(repository.id, retainSessionDays);
+      const nextSessions = await repositoryChatStorage.listSessionsByRepository(repository.id);
       if (operationId !== operationIdRef.current) return;
       setSessions(nextSessions);
       const mostRecent = nextSessions[0] ?? null;
@@ -100,7 +100,7 @@ export const useRepositoryChatSessions = ({
         createdAt: now,
         updatedAt: now,
       };
-      await repositoryChatSessionRepository.saveSession(session);
+      await repositoryChatStorage.saveSession(session);
       if (operationId !== operationIdRef.current) return null;
       setSessions((previous) => [session, ...previous]);
       setActiveSession(session);
@@ -127,7 +127,7 @@ export const useRepositoryChatSessions = ({
     setIsLoading(true);
     setError(null);
     try {
-      await repositoryChatSessionRepository.permanentlyDeleteSession(sessionId);
+      await repositoryChatStorage.permanentlyDeleteSession(sessionId);
       notifyGlobalHistoryChanged();
       if (operationId !== operationIdRef.current) return;
       const nextSessions = sessions.filter((session) => session.id !== sessionId);
@@ -143,7 +143,7 @@ export const useRepositoryChatSessions = ({
   }, [activeSession, loadSessionMessages, sessions]);
 
   const updateSession = useCallback(async (session: RepositoryChatSession) => {
-    await repositoryChatSessionRepository.saveSession(session);
+    await repositoryChatStorage.saveSession(session);
     setSessions((previous) => previous
       .map((item) => item.id === session.id ? session : item)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));

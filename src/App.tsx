@@ -18,7 +18,7 @@ import { useAutoUpdateCheck } from './hooks/useAutoUpdateCheck';
 import { logger } from './services/logger';
 import { UpdateNotificationBanner } from './components/UpdateNotificationBanner';
 import { ListsPushIndicator } from './components/ListsPushIndicator';
-import { useBackendLifecycle } from './features/lifecycle/useBackendLifecycle';
+import { useBackendLifecycle } from './features/lifecycle/hooks/useBackendLifecycle';
 import type { AppState } from './types';
 import { hasActiveSearchFilters } from './utils/repoSearch';
 

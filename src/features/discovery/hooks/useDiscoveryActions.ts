@@ -11,7 +11,7 @@ import { discoveryAnalysisStorage } from '../../../services/discoveryAnalysisSto
 import { buildCategoryHints, resolveCategoryAssignment } from '../../../utils/categoryUtils';
 import { getAllCategories } from '../../../store/useAppStore';
 import { useDialog } from '../../../hooks/useDialog';
-import { useAuthSessionGeneration } from '../../lifecycle/useAuthSessionGeneration';
+import { useAuthSessionGeneration } from '../../../hooks/useAuthSessionGeneration';
 
 const getChannelRequestSignature = (state: ReturnType<typeof selectDiscoveryViewState>, channelId: DiscoveryChannelId) => {
   const common = [state.githubToken, state.discoveryPlatform];

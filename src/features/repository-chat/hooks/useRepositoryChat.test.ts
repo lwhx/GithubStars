@@ -21,8 +21,8 @@ vi.mock('../../../services/repositoryChatRunner', () => ({
   runRepositoryChatTurn: mocks.runRepositoryChatTurn,
 }));
 
-vi.mock('../repositories/sessionRepository', () => ({
-  repositoryChatSessionRepository: {
+vi.mock('../../../services/repositoryChatStorage', () => ({
+  repositoryChatStorage: {
     listEvidence: mocks.listEvidence,
     listToolEvents: mocks.listToolEvents,
     saveMessage: mocks.saveMessage,

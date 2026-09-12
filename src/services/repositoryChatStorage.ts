@@ -3,7 +3,7 @@ import type {
   RepositoryChatSession,
   RepositoryChatToolEvent,
   ToolEvidence,
-} from '../../../types/repositoryChat';
+} from '../types/repositoryChat';
 
 const DB_NAME = 'gsm-repository-chat-db';
 const DB_VERSION = 1;
@@ -179,7 +179,7 @@ const byCreatedAt = <T extends { id: string; createdAt: string; role?: 'user' | 
 };
 const byUpdatedAtDescending = <T extends { updatedAt: string }>(left: T, right: T) => right.updatedAt.localeCompare(left.updatedAt);
 
-export const repositoryChatSessionRepository = {
+export const repositoryChatStorage = {
   async listSessionsByRepository(repoId: number): Promise<RepositoryChatSession[]> {
     const fallback = () => fallbackList<RepositoryChatSession>('sessions', (session) => session.repoId === repoId && !session.deletedAt).sort(byUpdatedAtDescending);
     if (useFallbackStorage || !canUseIndexedDb()) {

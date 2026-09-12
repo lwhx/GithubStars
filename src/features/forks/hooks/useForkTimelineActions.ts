@@ -6,7 +6,7 @@ import { selectForkTimelineState } from '../../../store/selectors';
 import { GitHubApiService } from '../../../services/githubApi';
 import { logger } from '../../../services/logger';
 import { useDialog } from '../../../hooks/useDialog';
-import { useAuthSessionGeneration, type AuthSessionGeneration } from '../../lifecycle/useAuthSessionGeneration';
+import { useAuthSessionGeneration, type AuthSessionGeneration } from '../../../hooks/useAuthSessionGeneration';
 
 interface SyncModalState {
   isOpen: boolean;

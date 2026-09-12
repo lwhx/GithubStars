@@ -8,7 +8,7 @@ import { useSearchShortcuts } from '../hooks/useSearchShortcuts';
 import { useSearchActions } from '../features/repositories/hooks/useSearchActions';
 import { useDialog } from '../hooks/useDialog';
 import { isRepoCustomized } from '../utils/repoUtils';
-import { repositoryChatSessionRepository } from '../features/repository-chat/repositories/sessionRepository';
+import { repositoryChatStorage } from '../services/repositoryChatStorage';
 import { applyRepoFilters, performBasicTextSearch as basicTextSearch, sortRepositories } from '../utils/repoSearch';
 import { NO_LICENSE_SENTINEL, normalizeLicense } from '../utils/licenseFilter';
 import { NumberInput } from './ui/NumberInput';
@@ -125,7 +125,7 @@ export const SearchBar: React.FC = () => {
     const refreshGlobalHistoryCount = async () => {
       const requestId = ++globalHistoryRequestRef.current;
       try {
-        const sessions = await repositoryChatSessionRepository.listRecentSessions(100);
+        const sessions = await repositoryChatStorage.listRecentSessions(100);
         if (!cancelled && requestId === globalHistoryRequestRef.current) setGlobalHistoryCount(sessions.length);
       } catch {
         if (!cancelled && requestId === globalHistoryRequestRef.current) setGlobalHistoryCount(0);

@@ -1,11 +1,9 @@
 # ADR 0001 — Frontend layering and dependency direction
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-26
 Supersedes: none
-Applies to: `src/components/**`, `src/features/**`, `src/store/**`, `src/services/**`
-
-> Status is **Proposed** until this PR lands; it flips to **Accepted** on merge.
+Applies to: `src/components/**`, `src/features/**`, `src/hooks/**`, `src/store/**`, `src/services/**`
 
 ## Context
 
@@ -74,6 +72,38 @@ Store, or any service — that is exactly the responsibility split the migration
 ⁵ Services may read Store state through `useAppStore.getState()` (non-reactive) but must not
 subscribe reactively. This is the existing pattern; nothing changes here.
 
+### File placement (enforced by `check-boundaries.cjs`)
+
+The dependency table only means something if every module has an unambiguous tier. These
+placement rules close the gray zones that existed before they were written down:
+
+- **Hooks** live in `src/features/*/hooks/**`. A `use*.ts(x)` module directly under a feature's
+  root directory fails `check-boundaries.cjs`. A hook that is genuinely shared across features
+  lives in `src/hooks/**` (footnote ² above) — importing it from another feature's `hooks/**`
+  is the sanctioned cross-feature path. (History: `useAuthSessionGeneration` and
+  `useBackendLifecycle` sat at `src/features/lifecycle/` root; the first hid two cross-feature
+  hook imports from every check, the second just set a bad example.)
+- **Feature-local view components** may live in `src/features/*/components/**`. They are View
+  tier: the business-service import ban for `src/components/**` applies to them identically,
+  in both ESLint and `check-boundaries.cjs`.
+- **Domain persistence modules** (IndexedDB/localStorage wrappers for one feature's data —
+  `repositoryChatStorage`, `discoveryAnalysisStorage`, `weeklyIssuesStorage`,
+  `indexedDbStorage`) live in `src/services/*Storage.ts`. By the rule of thumb below they are
+  infrastructure (local persistence, no remote calls, no Store mutation), so any tier may
+  import them. Do not invent new top-level directories inside a feature beyond `hooks/`,
+  `components/`, `application/`, `__tests__/` without an ADR amendment. (History:
+  `repository-chat/repositories/` invented an undocumented "repositories" tier whose name also
+  collided with the `repositories` feature.)
+
+### Page view-model selectors
+
+Selectors that bundle a whole page's state and actions (e.g. `selectReleaseTimelineState`,
+`selectDiscoveryViewState` in `src/store/selectors.ts`) are page-scoped contracts: their only
+reactive consumer is that page's orchestration hook in `src/features/*/hooks/**`. A component
+or hook that needs a subset must not subscribe through them — every field change re-renders
+it. Add a narrow single-value selector, or a small hook next to the page's action hooks (see
+`useWatchedSourcesSync`), instead.
+
 ### Why one persisted Store is retained
 
 The Store is split into *slices* for readability, but there is exactly **one** `create<AppStoreState>()(persist(...))`
@@ -115,9 +145,12 @@ guarantee for the v2 backend/electron split.
 
 ### Infrastructure vs business service — the import carve-out
 
-`no-restricted-imports` (PR 9) bans `src/components/**` from importing these **business services**:
-`githubApi`, `aiService`, `aiAnalysisHelper`, `aiAnalysisOptimizer`, `vectorSearchService`,
-`autoSync`, `webdavService`, `backendAdapter`, `rpcDownloadService`, `githubApiFactory`.
+`no-restricted-imports` (PR 9) bans View components — `src/components/**` and, since the
+placement rules above, `src/features/*/components/**` — from importing these **business
+services**: `githubApi`, `aiService`, `aiAnalysisHelper`, `aiAnalysisOptimizer`,
+`vectorSearchService`, `autoSync`, `webdavService`, `backendAdapter`, `rpcDownloadService`,
+`githubApiFactory`, `updateService`, `translateService`. The same list is mirrored in
+`scripts/check-boundaries.cjs`; keep the two in sync.
 
 These remain importable from components because they are **tools, not orchestration**:
 `logger`, `electronProxy` (`isElectron`), `indexedDbStorage`, `mcpElectronBridge`,
@@ -127,43 +160,49 @@ These remain importable from components because they are **tools, not orchestrat
 > a business service and belongs behind a hook. If it is a sync utility (`logger`, `isElectron`,
 > `indexedDBStorage`), it is infrastructure and may be imported anywhere.
 
-This PR's ban list is the ten services above. Two further services — `updateService` and
-`translateService` — are business services by the same rule (they make remote calls) but are
-*not* banned in this PR; `BilingualMarkdownRenderer`, `UpdateChecker`, and
-`UpdateNotificationBanner` still import them directly. They are phased out alongside the
-component tail below. The ban list is deliberately the set the migration already covered;
-expanding it is a follow-up PR, not this one.
+When this ADR landed, the ban list was the first ten services above; `updateService` and
+`translateService` (business services by the same rule — they make remote calls) were left
+unbanned because `BilingualMarkdownRenderer`, `UpdateChecker`, and `UpdateNotificationBanner`
+still imported them directly. That phase is complete: PR #326 migrated the last three
+components and folded both services into the ban list, and the allowlist no longer exists.
 
-### Phased enforcement
+### Phased enforcement (historical — completed in PR #326)
+
+The rollout was phased so that enforcement never masked a pile of pre-existing violations. This
+section records those mechanics; the phase is over and the allowlist no longer exists.
 
 PR 4–8 migrated the high-traffic components (`RepositoryCard`, `RepositoryList`, the settings
 panels, the timeline views). A snapshot at the `7337df0` baseline showed 33 components importing
-services; after the migration that number is down, but a tail of components (e.g.
+services; a tail of components (e.g.
 `SearchBar`, `ReadmeModal`, `LoginScreen`, `GistCard`, `ReleaseCard`, `SubscriptionRepoCard`,
 `CategorySidebar`, `RepositoryEditModal`, `DebugModeIndicator`, `SettingsPanel`,
-`ReleaseSourceSettingsModal`, `GistEditorModal`, `GistDetailModal`) still import business
+`ReleaseSourceSettingsModal`, `GistEditorModal`, `GistDetailModal`) still imported business
 services directly.
 
-PR 9 enforces the rule only on **already-migrated** component directories and the
-`src/components/ui/**` primitives (which should never touch a business service), and leaves the
-un-migrated tail on an explicit allowlist for a later PR. One-shot banning all remaining imports
-would light up a dozen files at once and force a rushed migration in a boundary-PR — exactly the
-"don't mask 33 violations in one go" failure mode. The allowlist is the phasing mechanism; each
-later PR that migrates a tail component also removes it from the allowlist.
+PR 9 therefore enforced the rule only on **already-migrated** component directories and the
+`src/components/ui/**` primitives (which should never touch a business service), leaving the
+un-migrated tail on an explicit allowlist: one-shot banning all remaining imports would have
+forced a rushed migration in a boundary-PR — exactly the
+"don't mask 33 violations in one go" failure mode. Each later PR migrated a tail component and
+removed it from the allowlist, until PR #326 migrated the last three, folded `updateService` and
+`translateService` into the ban list, and emptied the allowlist.
 
 ## Consequences
 
 - New components in migrated directories that try to import a business service fail lint **and**
-  the `check-boundaries.cjs` CI step.
+  the `check-boundaries.cjs` CI step. The same gates cover feature-local components under
+  `src/features/*/components/**`.
 - New code in `src/features/*/application/**` that imports React/JSX/DOM fails the same gates.
+- A `use*.ts(x)` module placed at a feature's root directory fails the `check-boundaries.cjs`
+  CI step.
 - A reviewer can point at this ADR instead of re-arguing the layering on every PR.
-- The allowlist is technical debt with an expiration date: each entry is a component that still
-  needs its operations lifted into a `src/features/*/hooks/*` hook.
 
 ## Open issues / follow-up
 
-- Migrate the allowlist tail components into hooks, one feature per PR, removing each from the
-  allowlist as it lands. This ADR does not schedule that work; it only forbids *new* direct
-  imports.
+- `src/features/discovery/hooks/useDiscoveryRepoActions.ts` imports
+  `src/features/repositories/application/discoveryRepoPatches` — a sideways import into a
+  sibling feature's internals (forbidden by the Decision above, not yet enforced by any tool).
+  Either lift the shared patch into a neutral module or route it through the Store; not
+  scheduled here.
 - If a future PR genuinely needs a component to call a business service (e.g. a throwaway debug
   component), the answer is a new hook in the right feature, not an `eslint-disable` comment.

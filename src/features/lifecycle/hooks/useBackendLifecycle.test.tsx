@@ -22,15 +22,15 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../services/backendAdapter', () => ({ backend: mocks.backend }));
-vi.mock('../../services/autoSync', () => ({
+vi.mock('../../../services/backendAdapter', () => ({ backend: mocks.backend }));
+vi.mock('../../../services/autoSync', () => ({
   tryRestoreAuthFromBackend: mocks.tryRestoreAuthFromBackend,
   syncLocalGitHubTokenToBackend: mocks.syncLocalGitHubTokenToBackend,
   syncFromBackend: mocks.syncFromBackend,
   startAutoSync: mocks.startAutoSync,
   stopAutoSync: mocks.stopAutoSync,
 }));
-vi.mock('../../services/mcpElectronBridge', () => ({
+vi.mock('../../../services/mcpElectronBridge', () => ({
   startMcpElectronBridge: mocks.startMcpElectronBridge,
   refreshMcpElectronBridge: mocks.refreshMcpElectronBridge,
   stopMcpElectronBridge: mocks.stopMcpElectronBridge,

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useReleaseTimelineActions } from './useReleaseTimelineActions';
+import { useWatchedSourcesSync } from './useWatchedSourcesSync';
 
 const mocks = vi.hoisted(() => ({
   useAppStore: vi.fn(),
@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   getAllWatchedRepositories: vi.fn(),
   setReleaseSourceRepositories: vi.fn(),
-  forceSyncToBackend: vi.fn(),
 }));
 
 vi.mock('../../../store/useAppStore', () => ({
@@ -25,19 +24,10 @@ vi.mock('../../../services/githubApi', () => ({
   },
 }));
 
-vi.mock('../../../services/autoSync', () => ({
-  forceSyncToBackend: mocks.forceSyncToBackend,
-}));
-
-vi.mock('../../../services/backendAdapter', () => ({
-  backend: { isAvailable: false, markAllReleasesAsRead: vi.fn() },
-}));
-
 const createStoreState = () => ({
-  // selectReleaseTimelineState 全字段
-  releases: [],
-  repositories: [],
-  releaseSubscriptions: new Set<number>(),
+  // useWatchedSourcesSync 的全部订阅：githubToken / language /
+  // setReleaseSourceRepositories 三个单值 selector + getState() 里的
+  // releaseSourceSettings。窄订阅不触碰其余 Release 时间线状态。
   releaseSourceSettings: {
     enabledSourceIds: ['watch-custom-release'],
     watchCustomReleaseRepos: [
@@ -45,38 +35,8 @@ const createStoreState = () => ({
     ],
     customReleaseRepos: [],
   },
-  readReleases: new Set<number>(),
   githubToken: 'github-token' as string | null,
   language: 'zh' as const,
-  assetFilters: new Map(),
-  addReleases: vi.fn(),
-  upsertReleases: vi.fn(),
-  markReleaseAsRead: vi.fn(),
-  markAssetAsRead: vi.fn(),
-  markAllReleasesAsRead: vi.fn(),
-  batchUnsubscribeReleases: vi.fn(),
-  removeReleasesByRepoFullName: vi.fn(),
-  updateRepository: vi.fn(),
-  removeReleaseSourceRepository: vi.fn(),
-  updateReleaseSourceRepository: vi.fn(),
-  releaseViewMode: 'grouped' as const,
-  releaseSelectedFilters: new Set<string>(),
-  releaseSearchQuery: '',
-  releaseExpandedRepositories: new Set<string>(),
-  releaseIsRefreshing: false,
-  setReleaseViewMode: vi.fn(),
-  toggleReleaseSelectedFilter: vi.fn(),
-  clearReleaseSelectedFilters: vi.fn(),
-  setReleaseSearchQuery: vi.fn(),
-  toggleReleaseExpandedRepository: vi.fn(),
-  setReleaseIsRefreshing: vi.fn(),
-  includePreRelease: false,
-  setIncludePreRelease: vi.fn(),
-  releaseShowMode: 'all' as const,
-  setReleaseShowMode: vi.fn(),
-  releaseLatestMode: 'latest' as const,
-  setReleaseLatestMode: vi.fn(),
-  // 独立单值 selector
   setReleaseSourceRepositories: mocks.setReleaseSourceRepositories,
 });
 
@@ -86,7 +46,7 @@ mockUseAppStore.mockImplementation((selector?: (state: typeof storeState) => unk
   selector ? selector(storeState) : storeState);
 (mockUseAppStore as unknown as { getState: () => typeof storeState }).getState = () => storeState;
 
-describe('useReleaseTimelineActions.syncWatchedSources', () => {
+describe('useWatchedSourcesSync', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storeState = createStoreState();
@@ -94,7 +54,7 @@ describe('useReleaseTimelineActions.syncWatchedSources', () => {
 
   it('returns silently without token or while a sync is running', async () => {
     storeState.githubToken = null;
-    const { result } = renderHook(() => useReleaseTimelineActions());
+    const { result } = renderHook(() => useWatchedSourcesSync());
     await act(async () => { await result.current.syncWatchedSources(); });
     expect(mocks.getAllWatchedRepositories).not.toHaveBeenCalled();
     expect(mocks.toast).not.toHaveBeenCalled();
@@ -136,7 +96,7 @@ describe('useReleaseTimelineActions.syncWatchedSources', () => {
         topics: [],
       },
     ]);
-    const { result } = renderHook(() => useReleaseTimelineActions());
+    const { result } = renderHook(() => useWatchedSourcesSync());
     await act(async () => { await result.current.syncWatchedSources(); });
 
     expect(mocks.setReleaseSourceRepositories).toHaveBeenCalledTimes(1);
@@ -149,7 +109,6 @@ describe('useReleaseTimelineActions.syncWatchedSources', () => {
     expect(fresh.release_hidden).toBeUndefined();
     expect(mocks.toast).toHaveBeenCalledWith('已同步 2 个 Watch 仓库。', 'success');
     expect(result.current.isSyncingWatchedSources).toBe(false);
-    expect(mocks.forceSyncToBackend).not.toHaveBeenCalled();
   });
 
   it('reads release_hidden from the latest state after the request resolves', async () => {
@@ -159,7 +118,7 @@ describe('useReleaseTimelineActions.syncWatchedSources', () => {
     mocks.getAllWatchedRepositories.mockImplementation(() => new Promise((resolve) => {
       resolveWatched = resolve;
     }));
-    const { result } = renderHook(() => useReleaseTimelineActions());
+    const { result } = renderHook(() => useWatchedSourcesSync());
 
     let pending!: Promise<void>;
     act(() => {
@@ -201,7 +160,7 @@ describe('useReleaseTimelineActions.syncWatchedSources', () => {
 
   it('toasts a failure without writing the store when the api rejects', async () => {
     mocks.getAllWatchedRepositories.mockRejectedValue(new Error('rate limited'));
-    const { result } = renderHook(() => useReleaseTimelineActions());
+    const { result } = renderHook(() => useWatchedSourcesSync());
     await act(async () => { await result.current.syncWatchedSources(); });
 
     expect(mocks.setReleaseSourceRepositories).not.toHaveBeenCalled();

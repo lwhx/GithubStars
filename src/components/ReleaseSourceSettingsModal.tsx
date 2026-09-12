@@ -6,7 +6,7 @@ import type { CustomReleaseRepository, ReleaseSourceId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { Modal } from './Modal';
 import { useDialog } from '../hooks/useDialog';
-import { useReleaseTimelineActions } from '../features/releases/hooks/useReleaseTimelineActions';
+import { useWatchedSourcesSync } from '../features/releases/hooks/useWatchedSourcesSync';
 import {
   CUSTOM_RELEASE_SOURCE_ID,
   RELEASE_SOURCE_LABELS,
@@ -211,7 +211,7 @@ interface WatchCustomReleaseSyncPanelProps {
 const WatchCustomReleaseSyncPanel: React.FC<WatchCustomReleaseSyncPanelProps> = ({ repos, language }) => {
   const githubToken = useAppStore(state => state.githubToken);
   const updateReleaseSourceRepository = useAppStore(state => state.updateReleaseSourceRepository);
-  const { syncWatchedSources, isSyncingWatchedSources } = useReleaseTimelineActions();
+  const { syncWatchedSources, isSyncingWatchedSources } = useWatchedSourcesSync();
   const isSyncing = isSyncingWatchedSources;
 
   const t = (zh: string, en: string) => language === 'zh' ? zh : en;

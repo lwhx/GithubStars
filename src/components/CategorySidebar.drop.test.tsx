@@ -118,6 +118,28 @@ describe('CategorySidebar drop-to-uncategorize (issue #353 suggestion)', () => {
     expect(syncMocks.forceSyncToBackend).not.toHaveBeenCalled();
   });
 
+  it('无锁定分类且 AI/默认分类均未命中的仓库拖到「全部分类」时保持 no-op（保留 undefined 以便后续 AI 归类）', async () => {
+    const neverMatchedRepo: Repository = {
+      ...categorizedRepo,
+      id: 2,
+      name: 'zzz-project',
+      full_name: 'owner/zzz-project',
+      description: '',
+      language: 'Rust',
+      topics: [],
+      ai_tags: undefined,
+      ai_summary: undefined,
+      custom_category: undefined,
+      category_locked: false,
+    };
+    renderSidebar([neverMatchedRepo]);
+
+    await dropOnCategory('全部分类', '2');
+
+    expect(storeState.updateRepository).not.toHaveBeenCalled();
+    expect(syncMocks.forceSyncToBackend).not.toHaveBeenCalled();
+  });
+
   it('拖到普通分类时沿用原有改分类逻辑（回归保护）', async () => {
     renderSidebar([categorizedRepo]);
 

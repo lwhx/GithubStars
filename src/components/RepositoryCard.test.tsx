@@ -423,3 +423,35 @@ describe('RepositoryCard interactive-element click exemption (issue #353)', () =
   });
 });
 
+
+describe('RepositoryCard touch-drag click suppression (CodeRabbit #355)', () => {
+  it('suppresses the compatibility click after a touch drag even when a compatibility mousemove fires', () => {
+    const { container } = renderRepositoryCard('grid');
+    const card = container.firstElementChild as HTMLElement;
+    const handle = card.querySelector('[draggable="true"]') as HTMLElement;
+
+    fireEvent.touchStart(handle, { touches: [{ clientX: 10, clientY: 10 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientX: 60, clientY: 60 }] });
+    fireEvent.touchEnd(handle, { touches: [] });
+
+    // 触摸后的兼容鼠标事件序列：mousemove 触发 dragStore 兜底清位，
+    // 但实例级抑制标志必须仍然拦截补发的 click
+    fireEvent.mouseMove(document.body);
+    expect(useRepositoryDragStore.getState().isDragging).toBe(false);
+    expect(fireEvent.click(card)).toBe(false);
+    expect(screen.queryByTestId('readme-modal')).not.toBeInTheDocument();
+  });
+
+  it('keeps the GitHub link navigable after a touch drag with compatibility mouse events', () => {
+    const { container } = renderRepositoryCard('grid');
+    const card = container.firstElementChild as HTMLElement;
+    const handle = card.querySelector('[draggable="true"]') as HTMLElement;
+
+    fireEvent.touchStart(handle, { touches: [{ clientX: 10, clientY: 10 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientX: 60, clientY: 60 }] });
+    fireEvent.touchEnd(handle, { touches: [] });
+    fireEvent.mouseMove(document.body);
+
+    expect(fireEvent.click(screen.getByTitle('在GitHub上查看'))).toBe(true);
+  });
+});

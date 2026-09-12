@@ -530,14 +530,15 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
 
   const handleTouchEnd = () => {
     if (isTouchDraggingRef.current) {
-      // 如果发生了拖拽，阻止后续点击事件（触摸序列会在 touchend 后补发 click）
-      useRepositoryDragStore.getState().startDrag();
+      // 触摸拖拽后的兼容鼠标事件序列（touchend → mousemove → click）会让
+      // dragStore 的 document 级 mousemove 兜底立即清位，因此触摸拖拽不能
+      // 走全局拖拽状态；用实例级标志独立抑制 200ms 内补发的 click。
+      // 期间新触摸由 handleTouchStart 重置，不受残留影响。
       setTimeout(() => {
-        useRepositoryDragStore.getState().endDrag();
+        isTouchDraggingRef.current = false;
       }, 200);
     }
     touchStartPosRef.current = null;
-    isTouchDraggingRef.current = false;
   };
 
   // 使用 ref 记录当前选中状态，避免闭包问题
@@ -598,8 +599,8 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
       return;
     }
 
-    // 如果正在拖拽，不处理点击
-    if (isDraggingRef.current || useRepositoryDragStore.getState().isDragging) {
+    // 如果正在拖拽，不处理点击（含触摸拖拽后的兼容 click 抑制窗口）
+    if (isDraggingRef.current || isTouchDraggingRef.current || useRepositoryDragStore.getState().isDragging) {
       event.preventDefault();
       event.stopPropagation();
       return;

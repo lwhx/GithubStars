@@ -72,9 +72,16 @@ export default tseslint.config(
      * `no-restricted-syntax` covers dynamic `import('...')` (ImportExpression), which
      * no-restricted-imports does not inspect.
      */
-    files: ['src/components/**/*.{ts,tsx}'],
+    // Covers the shared View tier (src/components/**) and feature-local view
+    // components (src/features/*/components/**), which are View tier per ADR 0001
+    // and must not import business services either.
+    files: [
+      'src/components/**/*.{ts,tsx}',
+      'src/features/*/components/**/*.{ts,tsx}',
+    ],
     ignores: [
       'src/components/**/*.test.{ts,tsx}',
+      'src/features/*/components/**/*.test.{ts,tsx}',
     ],
     rules: {
       'no-restricted-imports': [

@@ -5,16 +5,20 @@
  * A standalone, offline scanner that mirrors the ESLint `no-restricted-imports`
  * rules in eslint.config.js. It runs in CI as a defense-in-depth check so that
  * a misconfigured lint pass (or a contributor who disables the rule inline)
- * cannot silently let a View component import a business service, or an
- * application command import React/JSX/the Store/a service.
+ * cannot silently let a View component (shared or feature-local) import a
+ * business service, an application command import React/JSX/the Store/a service,
+ * or a feature hook sit outside its feature's hooks/ directory (or src/hooks/
+ * when shared across features).
  *
  * Contract source of truth: docs/adr/0001-frontend-layering.md
  *
  * Properties:
  *  - No network, no dynamic import, no execution of repo code. It only reads
  *    source files as text and pattern-matches import statements.
- *  - Exempts test files (*.test.ts / *.test.tsx) so vi.mock('../services/...')
- *    stays legal.
+ *  - Import checks exempt test files (*.test.ts / *.test.tsx) so
+ *    vi.mock('../services/...') stays legal. The hook-placement check applies
+ *    to test files too: a use* test at a feature root means the code is
+ *    misplaced regardless.
  *
  * Exit code: 0 = clean, 1 = violations found (or unreadable file).
  */
@@ -167,7 +171,25 @@ const files = walk(path.join(ROOT, 'src'));
 for (const full of files) {
   const relPath = rel(full);
   if (relPath.startsWith('src/components/')) checkComponentFile(full, relPath);
+  // Feature-local view components are View tier too (ADR 0001): same service ban.
+  else if (/^src\/features\/[^/]+\/components\//.test(relPath)) checkComponentFile(full, relPath);
   else if (/^src\/features\/[^/]+\/application\//.test(relPath)) checkApplicationFile(full, relPath);
+  else if (/^src\/features\/[^/]+\/[^/]+$/.test(relPath)) checkFeatureRootFile(relPath);
+}
+
+/**
+ * ADR 0001: domain hooks live in src/features/<feature>/hooks/**; hooks shared
+ * across features live in src/hooks/**. A use* module sitting directly at a
+ * feature's root is a placement violation — historically it also hid cross-feature
+ * hook imports (ADR footnote 2) from every automated check.
+ */
+function checkFeatureRootFile(relPath) {
+  const basename = relPath.split('/').pop();
+  if (!/^use[A-Z].*\.tsx?$/.test(basename)) return;
+  console.error(
+    `✖ ${relPath}: feature hooks must live in src/features/*/hooks/** (or src/hooks/** when shared across features). See docs/adr/0001-frontend-layering.md.`,
+  );
+  violations++;
 }
 
 if (violations > 0) {

@@ -1,11 +1,9 @@
 # ADR 0001 — Frontend layering and dependency direction
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-26
 Supersedes: none
-Applies to: `src/components/**`, `src/features/**`, `src/store/**`, `src/services/**`
-
-> Status is **Proposed** until this PR lands; it flips to **Accepted** on merge.
+Applies to: `src/components/**`, `src/features/**`, `src/hooks/**`, `src/store/**`, `src/services/**`
 
 ## Context
 
@@ -73,6 +71,38 @@ Store, or any service — that is exactly the responsibility split the migration
 
 ⁵ Services may read Store state through `useAppStore.getState()` (non-reactive) but must not
 subscribe reactively. This is the existing pattern; nothing changes here.
+
+### File placement (enforced by `check-boundaries.cjs`)
+
+The dependency table only means something if every module has an unambiguous tier. These
+placement rules close the gray zones that existed before they were written down:
+
+- **Hooks** live in `src/features/*/hooks/**`. A `use*.ts(x)` module directly under a feature's
+  root directory fails `check-boundaries.cjs`. A hook that is genuinely shared across features
+  lives in `src/hooks/**` (footnote ² above) — importing it from another feature's `hooks/**`
+  is the sanctioned cross-feature path. (History: `useAuthSessionGeneration` and
+  `useBackendLifecycle` sat at `src/features/lifecycle/` root; the first hid two cross-feature
+  hook imports from every check, the second just set a bad example.)
+- **Feature-local view components** may live in `src/features/*/components/**`. They are View
+  tier: the business-service import ban for `src/components/**` applies to them identically,
+  in both ESLint and `check-boundaries.cjs`.
+- **Domain persistence modules** (IndexedDB/localStorage wrappers for one feature's data —
+  `repositoryChatStorage`, `discoveryAnalysisStorage`, `weeklyIssuesStorage`,
+  `indexedDbStorage`) live in `src/services/*Storage.ts`. By the rule of thumb below they are
+  infrastructure (local persistence, no remote calls, no Store mutation), so any tier may
+  import them. Do not invent new top-level directories inside a feature beyond `hooks/`,
+  `components/`, `application/`, `__tests__/` without an ADR amendment. (History:
+  `repository-chat/repositories/` invented an undocumented "repositories" tier whose name also
+  collided with the `repositories` feature.)
+
+### Page view-model selectors
+
+Selectors that bundle a whole page's state and actions (e.g. `selectReleaseTimelineState`,
+`selectDiscoveryViewState` in `src/store/selectors.ts`) are page-scoped contracts: their only
+reactive consumer is that page's orchestration hook in `src/features/*/hooks/**`. A component
+or hook that needs a subset must not subscribe through them — every field change re-renders
+it. Add a narrow single-value selector, or a small hook next to the page's action hooks (see
+`useWatchedSourcesSync`), instead.
 
 ### Why one persisted Store is retained
 
@@ -154,8 +184,11 @@ later PR that migrates a tail component also removes it from the allowlist.
 ## Consequences
 
 - New components in migrated directories that try to import a business service fail lint **and**
-  the `check-boundaries.cjs` CI step.
+  the `check-boundaries.cjs` CI step. The same gates cover feature-local components under
+  `src/features/*/components/**`.
 - New code in `src/features/*/application/**` that imports React/JSX/DOM fails the same gates.
+- A `use*.ts(x)` module placed at a feature's root directory fails the `check-boundaries.cjs`
+  CI step.
 - A reviewer can point at this ADR instead of re-arguing the layering on every PR.
 - The allowlist is technical debt with an expiration date: each entry is a component that still
   needs its operations lifted into a `src/features/*/hooks/*` hook.
@@ -165,5 +198,10 @@ later PR that migrates a tail component also removes it from the allowlist.
 - Migrate the allowlist tail components into hooks, one feature per PR, removing each from the
   allowlist as it lands. This ADR does not schedule that work; it only forbids *new* direct
   imports.
+- `src/features/discovery/hooks/useDiscoveryRepoActions.ts` imports
+  `src/features/repositories/application/discoveryRepoPatches` — a sideways import into a
+  sibling feature's internals (forbidden by the Decision above, not yet enforced by any tool).
+  Either lift the shared patch into a neutral module or route it through the Store; not
+  scheduled here.
 - If a future PR genuinely needs a component to call a business service (e.g. a throwaway debug
   component), the answer is a new hook in the right feature, not an `eslint-disable` comment.

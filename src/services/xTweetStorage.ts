@@ -36,14 +36,18 @@ export interface XStoredRepo {
 
 export interface XTweetSyncMeta {
   lastSyncedAt: string | null;
+  /** 生成水位时的关注列表签名（规范化 handle 排序拼接）；列表变化则水位失效 */
+  followsSignature: string;
 }
 
 const DEFAULT_META: XTweetSyncMeta = {
   lastSyncedAt: null,
+  followsSignature: '',
 };
 
 const normalizeMeta = (meta: XTweetSyncMeta | null | undefined): XTweetSyncMeta => ({
   lastSyncedAt: meta?.lastSyncedAt ?? null,
+  followsSignature: typeof meta?.followsSignature === 'string' ? meta.followsSignature : '',
 });
 
 const DB_NAME = 'github-stars-x-tweet';

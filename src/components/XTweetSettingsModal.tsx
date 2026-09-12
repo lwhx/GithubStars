@@ -78,7 +78,12 @@ export const XTweetSettingsModal: React.FC<XTweetSettingsModalProps> = ({ isOpen
               type="button"
               variant="outline"
               onClick={() => {
-                const handle = normalizeXTweetHandleInput(input) || xTweetFollows[0]?.handle;
+                const normalizedInput = normalizeXTweetHandleInput(input);
+                if (input.trim() && !normalizedInput) {
+                  toast(t('请输入有效的 X 用户名。', 'Enter a valid X handle.'), 'error');
+                  return;
+                }
+                const handle = normalizedInput || xTweetFollows[0]?.handle;
                 if (!handle) {
                   toast(t('请先填写或添加一位博主用于测试。', 'Fill in or add an account to test first.'), 'error');
                   return;

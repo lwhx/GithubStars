@@ -125,19 +125,24 @@ const unescapeFlightString = (raw: string): string => {
 };
 
 const TWEET_MARK_PATTERN = /client:(VHdlZXQ6[A-Za-z0-9+/=]+):(legacy|details|counts|views)/g;
+/** 顶层时间线条目：TimelineTimelineEntry:tweet-<ID>:content（嵌套的引用/转推原文不在其中） */
+const TIMELINE_ENTRY_PATTERN = /TimelineTimelineEntry:tweet-(\d+):content/g;
 
 /**
- * 解析 x.com 未登录主页 HTML 中的推文。每条推文的 `:details` 块内含
- * full_text 与链接实体；同一推文的引用在 Flight 图中重复出现，按 ID 去重。
+ * 解析 x.com 未登录主页 HTML 中的推文。只认顶层时间线条目列出的推文——
+ * 嵌套的引用推文（quoted status）属于其他作者，若一并扫入会把它们误归属
+ * 给被关注的博主。每条推文的 `:details` 块内含 full_text 与链接实体；
+ * 同一推文的引用在 Flight 图中重复出现，按 ID 去重。
  */
 export function parseXTimelineHtml(html: string, handle: string): XStoredTweet[] {
+  const timelineIds = new Set([...html.matchAll(TIMELINE_ENTRY_PATTERN)].map((m) => m[1]));
   const tweets = new Map<string, XStoredTweet>();
   const marks = [...html.matchAll(TWEET_MARK_PATTERN)];
   for (let i = 0; i < marks.length; i++) {
     const mark = marks[i];
     if (mark[2] !== 'details') continue;
     const tweetId = decodeTweetRef(mark[1]);
-    if (!tweetId || tweets.has(tweetId)) continue;
+    if (!tweetId || !timelineIds.has(tweetId) || tweets.has(tweetId)) continue;
     const blockStart = (mark.index ?? 0) + mark[0].length;
     const blockEnd = i + 1 < marks.length ? (marks[i + 1].index ?? blockStart) : blockStart + 8000;
     const body = html.slice(blockStart, blockEnd);
@@ -341,10 +346,19 @@ async function runExclusiveSync(
   }
 }
 
-const isRecentlySynced = (meta: { lastSyncedAt: string | null }): boolean =>
-  meta.lastSyncedAt !== null
+/**
+ * 60 秒水位需同时满足：时间在窗口内 + 关注列表签名一致。
+ * 只看时间戳会让"同步后 60 秒内新添加的关注"被跳过、直到窗口结束才被抓取。
+ */
+const isRecentlySynced = (meta: { lastSyncedAt: string | null; followsSignature: string }, signature: string): boolean =>
+  meta.followsSignature === signature
+  && meta.lastSyncedAt !== null
   && Number.isFinite(Date.parse(meta.lastSyncedAt))
   && Date.now() - Date.parse(meta.lastSyncedAt) < RECENT_SYNC_SKIP_MS;
+
+/** 关注列表签名：规范化 handle 排序拼接（大小写不敏感去重后的集合身份） */
+const followsSignatureOf = (handles: string[]): string =>
+  [...new Set(handles.map((handle) => handle.toLowerCase()))].sort().join(',');
 
 /**
  * 频道抓取入口（refreshChannel 调用）：
@@ -369,8 +383,9 @@ export async function syncXTweetChannel(
   }
 
   const windowEnd = page * X_TWEET_CARD_PAGE_SIZE;
+  const signature = followsSignatureOf(handles);
   const meta0 = await xTweetStorage.getSyncMeta();
-  const recent = isRecentlySynced(meta0);
+  const recent = isRecentlySynced(meta0, signature);
   // 预读快照：不触网时直接复用为结算数据，避免同一次调用里重复全量遍历
   let snapshot: { tweets: Map<string, XStoredTweet>; repos: Map<string, XStoredRepo> } | null = null;
   let needsSync = page <= 1 && !recent;
@@ -389,7 +404,8 @@ export async function syncXTweetChannel(
     await runExclusiveSync(async (signal) => {
       // 上一轮可能已落盘新数据，重读最新状态
       const meta = await xTweetStorage.getSyncMeta();
-      if (isRecentlySynced(meta)) return;
+      if (isRecentlySynced(meta, signature)) return;
+      meta.followsSignature = signature;
       const tweets = await xTweetStorage.getAllTweets();
       const repos = await xTweetStorage.getAllRepos();
 
@@ -429,19 +445,22 @@ export async function syncXTweetChannel(
       }
 
       const enrichTargets = reposNeedingDetail(repos, touchedRepoKeys, Date.now());
+      const touchedRepos = () => [...touchedRepoKeys]
+        .map((key) => repos.get(key))
+        .filter((repo): repo is XStoredRepo => Boolean(repo));
       try {
         await enrichRepos(api, enrichTargets, onStatus, signal);
-      } finally {
-        // 中途限流/中止也不丢已获取的详情；水位与详情同一事务落盘
-        //（enrichTargets ⊆ touchedRepoKeys，只落盘本轮触达的仓库）
+        // 成功路径：详情与水位同一事务提交——若失败回滚，下轮会重抓而不是
+        // 带着新水位跳过、把缺详情的仓库晾到 TTL 才补
         meta.lastSyncedAt = new Date().toISOString();
-        await xTweetStorage.saveSyncBatch({
-          tweets: [],
-          repos: [...touchedRepoKeys]
-            .map((key) => repos.get(key))
-            .filter((repo): repo is XStoredRepo => Boolean(repo)),
-          meta,
-        });
+        await xTweetStorage.saveSyncBatch({ tweets: [], repos: touchedRepos(), meta });
+      } catch (error) {
+        if (isAbortError(error)) {
+          // 取消：保留已获取的详情，但不推进水位（下轮继续补全）
+          await xTweetStorage.saveSyncBatch({ tweets: [], repos: touchedRepos(), meta });
+        }
+        // 限流/令牌错误：不提交部分或降级详情，也不推进水位
+        throw error;
       }
     }, onStatus);
   }

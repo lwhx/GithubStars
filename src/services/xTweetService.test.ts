@@ -141,22 +141,29 @@ describe('decodeTweetRef', () => {
 
 describe('tweetSnowflakeToDate', () => {
   it('从雪花 ID 推导发布时间（ID 超出 Number 安全范围，精度无损）', () => {
-    // 已知样本：2098678373753225483 >> 22 + Twitter epoch ≈ 2026-01 上旬
-    const iso = tweetSnowflakeToDate('2098678373753225483');
-    expect(Number.isFinite(Date.parse(iso))).toBe(true);
+    // 已知样本：2098678373753225483 = 2026-09-12T07:41:30.518Z（Twitter epoch 1288834974657）
+    expect(tweetSnowflakeToDate('2098678373753225483')).toBe('2026-09-12T07:41:30.518Z');
     // 与相邻雪花 ID 的时间差与 ID 差同向
     const later = tweetSnowflakeToDate('2098678373753225484');
-    expect(Date.parse(later)).toBeGreaterThanOrEqual(Date.parse(iso));
+    expect(Date.parse(later)).toBeGreaterThanOrEqual(Date.parse('2026-09-12T07:41:30.518Z'));
   });
 });
 
 describe('parseXTimelineHtml（真实 x.com 未登录主页 fixture）', () => {
   const tweets = () => parseXTimelineHtml(REAL_TIMELINE_HTML, 'geekbb');
 
-  it('解析出 fixture 中的全部真实推文，ID 去重', () => {
+  it('解析出顶层时间线的 5 条真实推文（精确 ID），嵌套引用推文不计入', () => {
     const parsed = tweets();
-    expect(parsed.length).toBeGreaterThanOrEqual(6);
-    expect(new Set(parsed.map((t) => t.tweetId)).size).toBe(parsed.length);
+    // fixture 的 5 个顶层 TimelineTimelineEntry；2097971881596916185 是嵌套
+    // 引用推文（其他作者），不得归属给 geekbb
+    expect(new Set(parsed.map((t) => t.tweetId))).toEqual(new Set([
+      '2098678373753225483',
+      '2098629676495159496',
+      '2098604072572162341',
+      '2098581405253189796',
+      '2098310980103200951',
+    ]));
+    expect(parsed.some((t) => t.tweetId === '2097971881596916185')).toBe(false);
     expect(parsed.every((t) => t.handle === 'geekbb')).toBe(true);
     expect(parsed.every((t) => t.htmlUrl.startsWith('https://x.com/geekbb/status/'))).toBe(true);
   });
@@ -318,9 +325,11 @@ describe('syncXTweetChannel', () => {
   it('翻页返回累积前缀；缓存不足且刚同步过时不再触网', async () => {
     // 在真实 fixture 后追加 25 条带仓库链接的推文，凑出超过一页窗口的缓存
     const extra = Array.from({ length: 25 }, (_, i) => {
-      // base64("Tweet:<id>") 本身自带 VHdlZXQ6 前缀，client: 后直接拼即可
-      const ref = Buffer.from(`Tweet:${9000000000000000000n + BigInt(i)}`).toString('base64');
-      return `client:${ref}:details full_text:"repo https://github.com/alice/repo${i}" expanded_url:"https://github.com/alice/repo${i}"`;
+      // base64("Tweet:<id>") 本身自带 VHdlZXQ6 前缀，client: 后直接拼即可；
+      // 解析器只认顶层 TimelineTimelineEntry，合成块需一并带上
+      const id = (9000000000000000000n + BigInt(i)).toString();
+      const ref = Buffer.from(`Tweet:${id}`).toString('base64');
+      return `client:urt:server:TimelineTimelineEntry:tweet-${id}:content client:${ref}:details full_text:"repo https://github.com/alice/repo${i}" expanded_url:"https://github.com/alice/repo${i}"`;
     }).join(' ');
     const { transport } = stubTransport({ geekbb: REAL_TIMELINE_HTML + ' ' + extra });
     const details = new Map<string, GitHubRepoDetailRead | null>([
@@ -357,8 +366,8 @@ describe('probeXTweetSource', () => {
     const { transport } = stubTransport({ geekbb: REAL_TIMELINE_HTML });
     const result = await probeXTweetSource('geekbb', transport);
     expect(result.ok).toBe(true);
-    expect(result.tweetCount!).toBeGreaterThanOrEqual(6);
-    expect(result.repoCount!).toBeGreaterThanOrEqual(3);
+    expect(result.tweetCount!).toBe(5);
+    expect(result.repoCount!).toBe(3);
   });
 
   it('无效用户名与抓取失败均返回可展示错误', async () => {

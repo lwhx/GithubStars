@@ -1007,6 +1007,8 @@ export const DiscoveryView: React.FC = React.memo(() => {
                   <p className="text-xs text-muted-foreground dark:text-muted-foreground">
                     {selectedDiscoveryChannel === 'weekly' && weeklyStatusText
                       ? weeklyStatusText
+                      : selectedDiscoveryChannel === 'x-tweet' && xTweetStatusText
+                      ? xTweetStatusText
                       : t('GitHub API 响应中', 'Waiting for GitHub API response')}
                   </p>
                 </div>

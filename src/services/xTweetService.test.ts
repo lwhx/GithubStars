@@ -83,10 +83,19 @@ const makeDetail = (fullName: string): GitHubRepoDetailRead => ({
   topics: [],
 } as unknown as GitHubRepoDetailRead);
 
-const makeApi = (details: Map<string, GitHubRepoDetailRead | null>): GitHubApiService => ({
+const makeApi = (
+  details: Map<string, GitHubRepoDetailRead | null>,
+  graphqlError: Error | null = null,
+): GitHubApiService => ({
   graphqlFetchRepositories: vi.fn(async (fullNames: string[]) => {
+    if (graphqlError) throw graphqlError;
     const result = new Map<string, GitHubRepoDetailRead | null>();
-    for (const fullName of fullNames) result.set(fullName.toLowerCase(), details.get(fullName.toLowerCase()) ?? null);
+    // 与真实 GraphQL 语义一致：不存在的仓库不产生键（而非显式 null），
+    // 这样 REST 回退分支（restTargets）才可能被覆盖
+    for (const fullName of fullNames) {
+      const key = fullName.toLowerCase();
+      if (details.has(key)) result.set(key, details.get(key) ?? null);
+    }
     return result;
   }),
   getRepositoryDetails: vi.fn(async (owner: string, name: string) => {
@@ -325,6 +334,21 @@ describe('syncXTweetChannel', () => {
     const page2 = await syncXTweetChannel(api, 2, follows.slice(0, 1), undefined, transport);
     expect(page2.repos.length).toBeGreaterThan(X_TWEET_CARD_PAGE_SIZE);
     expect(page2.hasMore).toBe(false);
+  });
+});
+
+describe('REST 回退', () => {
+  it('GraphQL 整批失败时逐仓回退 REST 补全', async () => {
+    const { transport } = stubTransport({ geekbb: REAL_TIMELINE_HTML });
+    const api = makeApi(
+      new Map([['obsidianmd/knap', makeDetail('obsidianmd/knap')]]),
+      new Error('GraphQL batch failed: bad gateway'),
+    );
+    const result = await syncXTweetChannel(api, 1, follows.slice(0, 1), undefined, transport);
+    // knap 走 REST 成功；one-ip/mac-duo 不在详情表 → REST 404 → 标记不可用不出卡
+    expect(result.repos.map((repo) => repo.full_name)).toEqual(['obsidianmd/knap']);
+    expect(api.getRepositoryDetails).toHaveBeenCalledWith('obsidianmd', 'knap', expect.anything());
+    expect(api.getRepositoryDetails).toHaveBeenCalledWith('zhihui-hu', 'one-ip', expect.anything());
   });
 });
 

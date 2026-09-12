@@ -371,13 +371,18 @@ export async function syncXTweetChannel(
   const windowEnd = page * X_TWEET_CARD_PAGE_SIZE;
   const meta0 = await xTweetStorage.getSyncMeta();
   const recent = isRecentlySynced(meta0);
+  // 预读快照：不触网时直接复用为结算数据，避免同一次调用里重复全量遍历
+  let snapshot: { tweets: Map<string, XStoredTweet>; repos: Map<string, XStoredRepo> } | null = null;
   let needsSync = page <= 1 && !recent;
-  if (!needsSync && page > 1 && !recent) {
+  if (!needsSync) {
     const [tweets, repos] = await Promise.all([
       xTweetStorage.getAllTweets(),
       xTweetStorage.getAllRepos(),
     ]);
-    needsSync = buildXTweetDiscoveryRepos(tweets, repos, handles).length < windowEnd;
+    snapshot = { tweets, repos };
+    if (page > 1) {
+      needsSync = buildXTweetDiscoveryRepos(tweets, repos, handles).length < windowEnd;
+    }
   }
 
   if (needsSync) {
@@ -399,7 +404,15 @@ export async function syncXTweetChannel(
           const parsed = parseXTimelineHtml(html, handle);
           const { newTweets, pendingRepoKeys } = ingestFeedTweets(parsed, tweets, repos);
           for (const key of pendingRepoKeys) touchedRepoKeys.add(key);
-          await xTweetStorage.saveTweets(newTweets);
+          // 逐博主原子落盘（推文+仓库同一事务，水位此时不推进）：
+          // 中途中止不丢已抓批次，写失败则整批回滚、下轮重抓
+          await xTweetStorage.saveSyncBatch({
+            tweets: newTweets,
+            repos: [...touchedRepoKeys]
+              .map((key) => repos.get(key))
+              .filter((repo): repo is XStoredRepo => Boolean(repo)),
+            meta,
+          });
           succeeded++;
         } catch (error) {
           if (isAbortError(error)) throw error;
@@ -414,14 +427,14 @@ export async function syncXTweetChannel(
           ? firstError
           : new Error('X 推文抓取失败：所有博主的时间线均不可达');
       }
-      meta.lastSyncedAt = new Date().toISOString();
 
       const enrichTargets = reposNeedingDetail(repos, touchedRepoKeys, Date.now());
       try {
         await enrichRepos(api, enrichTargets, onStatus, signal);
       } finally {
-        // 中途限流/中止也不丢已获取的详情与新推文；水位同步落盘
+        // 中途限流/中止也不丢已获取的详情；水位与详情同一事务落盘
         //（enrichTargets ⊆ touchedRepoKeys，只落盘本轮触达的仓库）
+        meta.lastSyncedAt = new Date().toISOString();
         await xTweetStorage.saveSyncBatch({
           tweets: [],
           repos: [...touchedRepoKeys]
@@ -433,9 +446,14 @@ export async function syncXTweetChannel(
     }, onStatus);
   }
 
-  const tweets = await xTweetStorage.getAllTweets();
-  const repos = await xTweetStorage.getAllRepos();
-  const accumulated = buildXTweetDiscoveryRepos(tweets, repos, handles);
+  // 触网轮次内部已有原子落盘，结算读最新；未触网轮次复用预读快照
+  const settled = needsSync
+    ? {
+        tweets: await xTweetStorage.getAllTweets(),
+        repos: await xTweetStorage.getAllRepos(),
+      }
+    : snapshot!;
+  const accumulated = buildXTweetDiscoveryRepos(settled.tweets, settled.repos, handles);
   return {
     repos: accumulated.slice(0, windowEnd),
     hasMore: accumulated.length > windowEnd,

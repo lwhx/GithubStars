@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RepositoryCard } from './RepositoryCard';
 import { useAppStore } from '../store/useAppStore';
+import { useRepositoryDragStore } from '../store/useRepositoryDragStore';
 import type { Repository } from '../types';
 
 const actionMocks = vi.hoisted(() => ({
@@ -130,6 +131,7 @@ const renderRepositoryCard = (
 beforeEach(() => {
   vi.clearAllMocks();
   actionMocks.releaseSheet.suspend = null;
+  useRepositoryDragStore.getState().endDrag();
   storeState.releaseSubscriptions = new Set<number>([1]);
   storeState.vectorSearchConfig.enabled = true;
   Object.assign(actionMocks.actions, {
@@ -372,3 +374,52 @@ describe('RepositoryCard view modes', () => {
     expect(screen.getByRole('menuitem', { name: '问答此仓库' })).toBeInTheDocument();
   });
 });
+
+describe('RepositoryCard interactive-element click exemption (issue #353)', () => {
+  it('keeps the GitHub link navigable while the drag flag is stuck', () => {
+    renderRepositoryCard('grid');
+
+    act(() => {
+      useRepositoryDragStore.getState().startDrag();
+    });
+
+    // fireEvent.click 返回 false 表示事件被 preventDefault 取消
+    expect(fireEvent.click(screen.getByTitle('在GitHub上查看'))).toBe(true);
+    expect(screen.queryByTestId('readme-modal')).not.toBeInTheDocument();
+
+    act(() => {
+      useRepositoryDragStore.getState().endDrag();
+    });
+  });
+
+  it('still swallows blank-area card clicks while dragging', () => {
+    const { container } = renderRepositoryCard('grid');
+    const card = container.firstElementChild as HTMLElement;
+
+    act(() => {
+      useRepositoryDragStore.getState().startDrag();
+    });
+
+    expect(fireEvent.click(card)).toBe(false);
+
+    act(() => {
+      useRepositoryDragStore.getState().endDrag();
+    });
+  });
+
+  it('keeps the GitHub link navigable right after an edit-modal outside dismiss', async () => {
+    const user = userEvent.setup();
+    renderRepositoryCard('grid');
+
+    await user.click(screen.getByTitle('编辑仓库信息'));
+    const editModal = screen.getByTestId('repository-edit-modal');
+
+    // onOutsideDismiss 记录 dismiss 时间戳后，250ms 窗口内点击链接不被吞
+    // （真实弹窗由 Radix 关闭；mock 无关闭机制，不影响时间窗语义）
+    await act(async () => {
+      fireEvent.pointerDown(editModal);
+      expect(fireEvent.click(screen.getByTitle('在GitHub上查看'))).toBe(true);
+    });
+  });
+});
+

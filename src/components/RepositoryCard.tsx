@@ -8,6 +8,7 @@ import { useRepositoryPlatforms } from '../hooks/useRepositoryPlatforms';
 import { GripVertical, Star, StarOff, ExternalLink, Calendar, Bell, BellOff, Bot, Sparkles, Terminal, Edit3, BookOpen, Square, CheckSquare, Loader2, HelpCircle, Search, Scale, MoreHorizontal, PackageOpen, MessageSquareText } from 'lucide-react';
 import { Repository, Category } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { useRepositoryDragStore } from '../store/useRepositoryDragStore';
 import { getAICategory, getDefaultCategory } from '../utils/categoryUtils';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
@@ -483,15 +484,15 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
     event.stopPropagation();
     isDraggingRef.current = true;
     // 标记正在拖拽，防止触发卡片点击
-    (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = true;
+    // 全局状态走 dragStore：document 级兜底监听保证源卡片在 drop 时
+    // 被卸载（如分类视图切换）后拖拽状态仍能可靠清除（issue #353）
+    useRepositoryDragStore.getState().startDrag();
   };
 
   const handleDragEnd = () => {
     isDraggingRef.current = false;
-    // 拖拽结束后延迟清除标记，确保 click 事件能检测到拖拽状态
-    setTimeout(() => {
-      (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = false;
-    }, 200);
+    // document 兜底监听通常已先行复位；此处同步调用保持幂等一致
+    useRepositoryDragStore.getState().endDrag();
   };
 
   const handleDragHandleMouseDown = (event: React.MouseEvent) => {
@@ -501,7 +502,7 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
 
   const handleDragHandleClick = (event: React.MouseEvent) => {
     // 如果发生了拖拽，阻止点击事件
-    if (isDraggingRef.current || (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo) {
+    if (isDraggingRef.current || useRepositoryDragStore.getState().isDragging) {
       event.preventDefault();
       event.stopPropagation();
     }
@@ -529,10 +530,10 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
 
   const handleTouchEnd = () => {
     if (isTouchDraggingRef.current) {
-      // 如果发生了拖拽，阻止后续点击事件
-      (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = true;
+      // 如果发生了拖拽，阻止后续点击事件（触摸序列会在 touchend 后补发 click）
+      useRepositoryDragStore.getState().startDrag();
       setTimeout(() => {
-        (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = false;
+        useRepositoryDragStore.getState().endDrag();
       }, 200);
     }
     touchStartPosRef.current = null;
@@ -562,6 +563,14 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
 
   // 使用 useCallback 优化事件处理函数
   const handleCardClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // 点击目标是链接/按钮等交互元素时永不拦截：链接导航与按钮动作必须保留
+    // 默认行为；时间窗防误触（弹窗关闭防抖/拖拽标志）只应作用于卡片空白区域。
+    // 交互元素检查必须先于所有拦截分支，否则弹窗关闭防抖或拖拽标志一旦
+    // 滞留，「在 GitHub 上查看」等链接会被 preventDefault 吞掉（issue #353）。
+    const target = event.target as HTMLElement;
+    // 排除卡片本身的 role="button"，只检查子元素的交互元素
+    if (target.closest('button, a, input, textarea, select, [draggable="true"]')) return;
+
     const releaseSheetDismissedAt = releaseSheetOutsideDismissedAtRef.current;
     if (releaseSheetDismissedAt !== null) {
       releaseSheetOutsideDismissedAtRef.current = null;
@@ -590,7 +599,7 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
     }
 
     // 如果正在拖拽，不处理点击
-    if (isDraggingRef.current || (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo) {
+    if (isDraggingRef.current || useRepositoryDragStore.getState().isDragging) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -599,14 +608,6 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
     const dismissedByPointerDown = menuDismissedByPointerDownRef.current;
     menuDismissedByPointerDownRef.current = false;
     if (dismissedByPointerDown) return;
-
-    // 检查点击目标是否是交互元素或其子元素
-    const target = event.target as HTMLElement;
-    // 排除卡片本身的 role="button"，只检查子元素的交互元素
-    const isInteractiveElement = target.closest('button, a, input, textarea, select, [draggable="true"]');
-
-    // 如果点击的是交互元素，不处理
-    if (isInteractiveElement) return;
 
     // 菜单展开时，点击卡片空白处仅收起菜单，不触发详情或选择。
     if (isActionsMenuOpen) {

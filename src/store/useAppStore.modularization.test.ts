@@ -114,7 +114,6 @@ const currentPersistedKeys = [
   'discoverySelectedTopic',
   'weeklyOnlyCollected',
   'xTweetFollows',
-  'xTweetFeedBaseUrl',
   'proxyConfig',
   'rpcDownloadConfig',
   'routeMode',

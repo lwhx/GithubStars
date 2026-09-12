@@ -3,7 +3,7 @@ import type { AppState, TrendingTimeRange } from '../types';
 import { defaultHeaderMenuConfig, defaultReleaseSourceSettings, defaultSubscriptionChannels } from '../types';
 import { defaultRepositoryChatSettings } from '../types/repositoryChat';
 import { DEFAULT_THEME_PRESET_ID } from '../constants/themePresets';
-import { DEFAULT_XTWEET_FEED_BASE_URL, DEFAULT_XTWEET_FOLLOWS } from '../utils/xTweetFollows';
+import { DEFAULT_XTWEET_FOLLOWS } from '../utils/xTweetFollows';
 import { readSessionBackendSecret } from './persistence/authStorage';
 import {
   defaultDiscoveryChannels,
@@ -116,7 +116,6 @@ export const createInitialState = (): AppState => ({
       weeklyOnlyCollected: false,
       weeklySyncStatus: null,
       xTweetFollows: DEFAULT_XTWEET_FOLLOWS.map((follow) => ({ ...follow })),
-      xTweetFeedBaseUrl: DEFAULT_XTWEET_FEED_BASE_URL,
       xTweetSyncStatus: null,
 
       // Subscription

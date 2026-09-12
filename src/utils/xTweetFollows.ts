@@ -1,5 +1,5 @@
 /**
- * X 推文频道关注配置的纯工具：默认关注、输入归一化与持久化数据修复。
+ * X 推文频道关注配置的纯工具：默认关注与输入归一化。
  * 被 store（hydration/migrate）与设置弹窗共用，不依赖 React / Store。
  */
 
@@ -9,8 +9,6 @@ import type { XTweetFollow } from '../types';
 export const DEFAULT_XTWEET_FOLLOWS: XTweetFollow[] = [
   { handle: 'geekbb', addedAt: '2026-09-12T00:00:00.000Z' },
 ];
-
-export const DEFAULT_XTWEET_FEED_BASE_URL = 'https://rsshub.app';
 
 /** X handle 语义：1-15 位字母数字下划线（宽松允许中间连字符以兼容改名过渡期） */
 const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
@@ -59,18 +57,4 @@ export const normalizeXTweetFollows = (value: unknown): XTweetFollow[] => {
     }
   }
   return [...byKey.values()];
-};
-
-/** 修复持久化的 RSSHub 实例地址：空/非法时回退默认实例。 */
-export const normalizeXTweetFeedBaseUrl = (value: unknown): string => {
-  if (typeof value !== 'string') return DEFAULT_XTWEET_FEED_BASE_URL;
-  const raw = value.trim().replace(/\/+$/, '');
-  if (!raw) return DEFAULT_XTWEET_FEED_BASE_URL;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return DEFAULT_XTWEET_FEED_BASE_URL;
-    return url.origin + (url.pathname === '/' ? '' : url.pathname);
-  } catch {
-    return DEFAULT_XTWEET_FEED_BASE_URL;
-  }
 };

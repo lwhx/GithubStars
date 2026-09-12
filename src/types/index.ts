@@ -549,8 +549,6 @@ export interface AppState {
   weeklySyncStatus: WeeklySyncStatus | null;
   /** X 推文频道：关注博主列表（handle 不含 @，初始化含 geekbb） */
   xTweetFollows: XTweetFollow[];
-  /** X 推文频道：RSSHub 兼容实例基础地址 */
-  xTweetFeedBaseUrl: string;
   /** X 推文频道同步/详情补全进度（会话级，不持久化） */
   xTweetSyncStatus: WeeklySyncStatus | null;
 

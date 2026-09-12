@@ -5,7 +5,7 @@ import { defaultHeaderMenuConfig, defaultReleaseSourceSettings, defaultSubscript
 import { defaultRepositoryChatSettings } from '../../types/repositoryChat';
 import { logger } from '../../services/logger';
 import { normalizeReleaseSourceSettings } from '../../utils/releaseSources';
-import { normalizeXTweetFeedBaseUrl, normalizeXTweetFollows } from '../../utils/xTweetFollows';
+import { normalizeXTweetFollows } from '../../utils/xTweetFollows';
 import type { AppStoreState } from '../types';
 import {
   defaultDiscoveryChannels,
@@ -149,7 +149,6 @@ discoverySortOrder: state.discoverySortOrder,
 discoverySelectedTopic: state.discoverySelectedTopic,
 weeklyOnlyCollected: state.weeklyOnlyCollected,
 xTweetFollows: state.xTweetFollows,
-xTweetFeedBaseUrl: state.xTweetFeedBaseUrl,
 // 持久化完整代理配置，包含认证密码，确保重启后无需重新输入。
 proxyConfig: {
   enabled: state.proxyConfig.enabled,
@@ -316,11 +315,11 @@ state.discoverySortOrder = 'Descending';
     (state as Record<string, unknown>).weeklyOnlyCollected = false;
   }
 
-  // v14→v15: X 推文频道选项兜底（关注列表默认含 geekbb，实例地址回退默认源）
+  // v14→v15: X 推文频道选项兜底（关注列表默认含 geekbb）
   if (state) {
-    const stateRecord = state as Record<string, unknown>;
-    stateRecord.xTweetFollows = normalizeXTweetFollows(stateRecord.xTweetFollows);
-    stateRecord.xTweetFeedBaseUrl = normalizeXTweetFeedBaseUrl(stateRecord.xTweetFeedBaseUrl);
+    (state as Record<string, unknown>).xTweetFollows = normalizeXTweetFollows(
+      (state as Record<string, unknown>).xTweetFollows,
+    );
   }
 
   // v5→v6: 初始化 proxyConfig

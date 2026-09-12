@@ -1,10 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_XTWEET_FEED_BASE_URL,
   DEFAULT_XTWEET_FOLLOWS,
   normalizeXTweetFollows,
   normalizeXTweetHandleInput,
-  normalizeXTweetFeedBaseUrl,
 } from './xTweetFollows';
 
 describe('normalizeXTweetHandleInput', () => {
@@ -47,19 +45,5 @@ describe('normalizeXTweetFollows', () => {
       { handle: 'geekbb', addedAt: '2026-09-12T00:00:00.000Z' },
       { handle: 'ruanyf', addedAt: '1970-01-01T00:00:00.000Z' },
     ]);
-  });
-});
-
-describe('normalizeXTweetFeedBaseUrl', () => {
-  it('剥掉末尾斜杠并保留路径', () => {
-    expect(normalizeXTweetFeedBaseUrl('https://rsshub.example.com/')).toBe('https://rsshub.example.com');
-    expect(normalizeXTweetFeedBaseUrl('https://proxy.example.com/rsshub/')).toBe('https://proxy.example.com/rsshub');
-  });
-
-  it('空/非法/非 http(s) 输入回退默认实例', () => {
-    expect(normalizeXTweetFeedBaseUrl('')).toBe(DEFAULT_XTWEET_FEED_BASE_URL);
-    expect(normalizeXTweetFeedBaseUrl('not a url')).toBe(DEFAULT_XTWEET_FEED_BASE_URL);
-    expect(normalizeXTweetFeedBaseUrl('ftp://rsshub.example.com')).toBe(DEFAULT_XTWEET_FEED_BASE_URL);
-    expect(normalizeXTweetFeedBaseUrl(42)).toBe(DEFAULT_XTWEET_FEED_BASE_URL);
   });
 });

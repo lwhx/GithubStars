@@ -1,23 +1,18 @@
 /**
- * X 推文频道数据服务（按需分页抓取，仿 weeklyIssuesService）。
+ * X 推文频道数据服务（自研抓取器，直连 x.com，不依赖第三方实例）。
  *
- * 数据管道：RSSHub 兼容实例的 /twitter/user/:id 路由（count 路由参数控制
- * 每博主拉取条数）→ RSS 解析出推文 → 正文提取 GitHub 仓库链接（含仓库
- * 链接的推文为有效推文）→ 按 tweetId 去重增量合并（原贴取最新推文）→
- * 仓库详情补全（GraphQL 批量优先，REST 逐仓回退）→ 独立 IndexedDB 持久化
- * → 客户端按推文时间倒序 + 分页切片。
+ * 数据管道：传输层（Electron 主进程 IPC 或 fullstack 服务端路由）代抓
+ * https://x.com/<handle> 未登录主页 HTML → 解析页面内嵌的 React Flight
+ * 数据（推文 ID 在 `client:VHdlZXQ6<base64>` 引用中解码，正文与链接实体
+ * 在 `:details` 块内，发布时间由雪花 ID 推导）→ expanded_url 提取 GitHub
+ * 仓库链接（复用周刊提取规则）→ 按 tweetId 去重增量合并 → 仓库详情补全
+ * （GraphQL 批量优先，REST 逐仓回退）→ 独立 IndexedDB 持久化 → 按推文
+ * 时间倒序分页切片。
  *
- * 分页语义（不一次性取全量）：
- * - 首页（page 1 / 手动刷新）：对每位关注博主请求 count=每页条数 的最新
- *   时间线（增量，已知推文按 ID 跳过）；60 秒内同步过且水位覆盖当前关注
- *   列表则直接走缓存。
- * - 翻页（page N）：仅当缓存卡片不足该页所需时，对未取尽的博主请求
- *   count = N × 每页条数 的时间线（更深的历史），重叠部分由 ID 去重吸收；
- *   feed 返回条数不足请求数即视为该博主历史取尽。
- * - 每页返回累积前缀切片（前 page × 每页条数张卡片，调用方整体替换）：
- *   有效推文密度低时首页窗口可能没填满，加深拉取新增的卡片会落进已消费
- *   的窗口内，整体替换才能让它们现身（append 切片永远补不到）。
- * - 只有新触达的仓库才会调用 GitHub API 补详情；详情快照 30 天内免刷新。
+ * 源能力边界（2026-09 实测）：未登录主页每次返回每博主最新一小批推文、
+ * 无历史翻页游标，因此"加载更多"是对累计缓存的分页，增量来自每次刷新
+ * 重抓的最新批次；60 秒内重复刷新走缓存。纯浏览器（静态部署）受 CORS
+ * 限制不可用，需桌面版或服务端模式。
  */
 
 import type {
@@ -28,30 +23,26 @@ import type {
   XTweetFollow,
 } from '../types';
 import { logger } from './logger';
+import { backend } from './backendAdapter';
+import { fetchXTimelineViaDesktop } from './electronProxy';
 import type { GitHubApiService } from './githubApi';
 import { extractRepoFullNames } from './weeklyIssuesService';
 import {
   xTweetStorage,
   type XStoredRepo,
   type XStoredTweet,
-  type XTweetSyncMeta,
 } from './xTweetStorage';
 
 const X_TWEET_CHANNEL: DiscoveryChannelId = 'x-tweet';
-/** 每博主每页拉取的推文数（第 N 页请求 count = page × 该值，上限 100） */
-export const X_TWEET_TWEETS_PER_BLOGGER = 20;
-/** 频道每页卡片数（与 UI 的"加载更多"切片对齐） */
+/** 频道每页卡片数 */
 export const X_TWEET_CARD_PAGE_SIZE = 20;
-/** Twitter API / RSSHub 的单次 count 上限 */
-export const X_TWEET_MAX_TWEETS_PER_FETCH = 100;
+const HANDLE_THROTTLE_MS = 500;
 const REST_ENRICH_THROTTLE_MS = 80;
-const RSS_FETCH_THROTTLE_MS = 150;
-const FETCH_TIMEOUT_MS = 20_000;
 /** 仓库详情的刷新周期：30 天内的快照视为新鲜 */
 const REPO_DETAIL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** 不可用仓库（404/私有）的重试周期 */
 const UNAVAILABLE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
-/** 60 秒内同步过且水位覆盖当前关注列表则跳过首页刷新遍历 */
+/** 60 秒内同步过则跳过刷新遍历（重复触发走缓存） */
 const RECENT_SYNC_SKIP_MS = 60 * 1000;
 
 type StatusCallback = ((status: WeeklySyncStatus | null) => void) | undefined;
@@ -68,88 +59,112 @@ const isRateLimitError = (error: unknown): boolean =>
 const isTokenInvalidError = (error: unknown): boolean =>
   error instanceof Error && error.message.includes('token expired or invalid');
 
-/** 从推文链接提取推文 ID（https://x.com/<handle>/status/<id>） */
-export function extractTweetId(link: string): string | null {
-  const match = link.match(/\/status\/(\d+)/);
-  return match ? match[1] : null;
-}
+export const isValidXTweetHandle = (handle: string): boolean =>
+  /^[A-Za-z0-9_]{1,15}$/.test(handle);
 
-const decodeEntities = (text: string): string => {
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = text;
-  return tempDiv.textContent || '';
-};
-
-/** 展示名：优先 RSS 作者字段，回退 @handle */
-const pickDisplayName = (item: Element, handle: string): string => {
-  const author = item.getElementsByTagName('dc:creator')[0]?.textContent
-    || item.getElementsByTagName('author')[0]?.textContent
-    || '';
-  const decoded = decodeEntities(author).replace(/^@/, '').trim();
-  return decoded || handle;
-};
+export type XTimelineTransport = (handle: string) => Promise<string>;
 
 /**
- * 解析 RSSHub 的 X 用户时间线 feed。只保留能取到推文 ID 的条目；
- * 正文保留原始 HTML（渲染侧统一走 rehype-sanitize）。
+ * 传输层：抓取 x.com 未登录主页 HTML。桌面端走主进程 IPC（跟随应用代理），
+ * 失败时回退 fullstack 服务端路由；两者都不可用时抛错（纯浏览器模式不支持）。
  */
-export function parseXTweetFeed(xml: string, handle: string): XStoredTweet[] {
-  const doc = new DOMParser().parseFromString(xml, 'text/xml');
-  if (doc.querySelector('parsererror')) {
-    throw new Error('X feed XML parse error');
+export const defaultXTimelineTransport: XTimelineTransport = async (handle) => {
+  let desktopError: unknown = null;
+  if (typeof window !== 'undefined' && window.electronAPI?.xFetchTimeline) {
+    try {
+      const html = await fetchXTimelineViaDesktop(handle);
+      if (html !== null) return html;
+    } catch (error) {
+      desktopError = error;
+    }
   }
-  const tweets: XStoredTweet[] = [];
-  for (const item of Array.from(doc.querySelectorAll('item'))) {
-    const link = item.querySelector('link')?.textContent?.trim() || '';
-    const tweetId = extractTweetId(link) || item.querySelector('guid')?.textContent?.trim() || '';
-    if (!tweetId) continue;
-    const content = item.querySelector('description')?.textContent?.trim() || '';
-    const pubDate = item.querySelector('pubDate')?.textContent?.trim() || '';
-    const parsedDate = pubDate ? Date.parse(pubDate) : NaN;
-    tweets.push({
-      tweetId,
-      handle,
-      displayName: pickDisplayName(item, handle),
-      content,
-      htmlUrl: link || `https://x.com/${handle}`,
-      createdAt: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : new Date(0).toISOString(),
-      repoFullNames: extractRepoFullNames(content).map((fullName) => fullName.toLowerCase()),
-    });
-  }
-  return tweets;
-}
-
-/** 拉取单位博主的时间线 feed（RSSHub 路由参数 count 控制条数）。 */
-async function fetchBloggerFeed(
-  feedBaseUrl: string,
-  handle: string,
-  count: number,
-  signal: AbortSignal | undefined,
-): Promise<XStoredTweet[]> {
-  const url = `${feedBaseUrl.replace(/\/+$/, '')}/twitter/user/${encodeURIComponent(handle)}/count=${count}`;
-  const controller = new AbortController();
-  const abort = () => controller.abort(new DOMException('Aborted', 'AbortError'));
-  signal?.addEventListener('abort', abort, { once: true });
-  const timeoutTimer = setTimeout(abort, FETCH_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      headers: { 'Accept': 'application/rss+xml, application/xml, text/xml' },
-      signal: controller.signal,
+  const backendUrl = backend.backendUrl;
+  if (backendUrl) {
+    const response = await fetch(`${backendUrl}/xtweet/profile/${encodeURIComponent(handle)}`, {
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
-      throw new Error(`X feed fetch failed: ${response.status}`);
+      throw new Error(`服务端抓取 x.com 失败 (${response.status})`);
     }
-    const text = await response.text();
-    return parseXTweetFeed(text, handle);
-  } finally {
-    clearTimeout(timeoutTimer);
-    signal?.removeEventListener('abort', abort);
+    const data = await response.json();
+    if (typeof data?.html === 'string') return data.html;
+    throw new Error('服务端返回数据无效');
+  }
+  if (desktopError) throw desktopError;
+  throw new Error('当前运行模式不支持 X 推文抓取：需要桌面版（Electron）或服务端模式');
+};
+
+/** 从 Flight 的 client 引用解码推文 ID（VHdlZXQ6… == base64("Tweet:<id>")） */
+export function decodeTweetRef(ref: string): string | null {
+  try {
+    const decoded = atob(ref);
+    const match = decoded.match(/^Tweet:(\d+)$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
   }
 }
 
+/** 雪花 ID → 发布时间（Twitter epoch 1288834974657）。ID 超出 Number 安全范围，必须用 BigInt。 */
+export function tweetSnowflakeToDate(tweetId: string): string {
+  try {
+    const ms = (BigInt(tweetId) >> 22n) + 1288834974657n;
+    return new Date(Number(ms)).toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
+}
+
+/** Flight 内嵌字符串是 JS 字面量（\n \" 转义），按 JSON 字符串语义还原。 */
+const unescapeFlightString = (raw: string): string => {
+  try {
+    return JSON.parse(`"${raw}"`) as string;
+  } catch {
+    return raw;
+  }
+};
+
+const TWEET_MARK_PATTERN = /client:(VHdlZXQ6[A-Za-z0-9+/=]+):(legacy|details|counts|views)/g;
+
 /**
- * 处理一轮 feed 结果：新推文进内存映射并登记，推文涉及的仓库 upsert
- * （原贴指向发布时间最新的推文），返回本轮需要补全详情的仓库。
+ * 解析 x.com 未登录主页 HTML 中的推文。每条推文的 `:details` 块内含
+ * full_text 与链接实体；同一推文的引用在 Flight 图中重复出现，按 ID 去重。
+ */
+export function parseXTimelineHtml(html: string, handle: string): XStoredTweet[] {
+  const tweets = new Map<string, XStoredTweet>();
+  const marks = [...html.matchAll(TWEET_MARK_PATTERN)];
+  for (let i = 0; i < marks.length; i++) {
+    const mark = marks[i];
+    if (mark[2] !== 'details') continue;
+    const tweetId = decodeTweetRef(mark[1]);
+    if (!tweetId || tweets.has(tweetId)) continue;
+    const blockStart = (mark.index ?? 0) + mark[0].length;
+    const blockEnd = i + 1 < marks.length ? (marks[i + 1].index ?? blockStart) : blockStart + 8000;
+    const body = html.slice(blockStart, blockEnd);
+    const fullText = body.match(/full_text:"((?:[^"\\]|\\.)*)"/);
+    if (!fullText) continue;
+    const content = unescapeFlightString(fullText[1]);
+    const repoFullNames = [...new Set(
+      [...body.matchAll(/expanded_url:"(https:\/\/github\.com\/[^"]+)"/g)]
+        .map((m) => extractRepoFullNames(unescapeFlightString(m[1])))
+        .flat(),
+    )].map((fullName) => fullName.toLowerCase());
+    tweets.set(tweetId, {
+      tweetId,
+      handle,
+      displayName: handle,
+      content,
+      htmlUrl: `https://x.com/${handle}/status/${tweetId}`,
+      createdAt: tweetSnowflakeToDate(tweetId),
+      repoFullNames,
+    });
+  }
+  return [...tweets.values()];
+}
+
+/**
+ * 处理一轮解析结果：新推文进内存映射并登记，推文涉及的仓库 upsert
+ * （原贴指向发布时间最新的推文），返回本轮需要补全详情的仓库键。
  */
 export function ingestFeedTweets(
   feed: XStoredTweet[],
@@ -159,8 +174,7 @@ export function ingestFeedTweets(
   const newTweets: XStoredTweet[] = [];
   const pendingRepoKeys = new Set<string>();
   for (const tweet of feed) {
-    const existing = tweets.get(tweet.tweetId);
-    if (existing) continue;
+    if (tweets.has(tweet.tweetId)) continue;
     tweets.set(tweet.tweetId, tweet);
     newTweets.push(tweet);
 
@@ -301,34 +315,6 @@ export function buildXTweetDiscoveryRepos(
   return list;
 }
 
-const normalizeHandleKey = (handle: string): string => handle.trim().toLowerCase();
-
-const isExhausted = (meta: XTweetSyncMeta, handleKey: string): boolean =>
-  meta.exhaustedHandles.some((handle) => handle.toLowerCase() === handleKey);
-
-/** 是否还有博主能拉到更深的历史（未取尽且水位未到单次 count 上限） */
-const canDeepenAnyHandle = (meta: XTweetSyncMeta, handles: string[]): boolean =>
-  handles.some((handle) => {
-    const key = normalizeHandleKey(handle);
-    return !isExhausted(meta, key) && (meta.fetchedCounts[key] ?? 0) < X_TWEET_MAX_TWEETS_PER_FETCH;
-  });
-
-/**
- * 首页是否需要刷新遍历：60 秒内同步过、实例地址未变、且水位已覆盖当前
- * 全部关注（新添加的关注还没拉过）时跳过，走缓存。
- */
-export function shouldRefreshPage1(
-  meta: XTweetSyncMeta,
-  handles: string[],
-  feedBaseUrl: string,
-  nowMs: number,
-): boolean {
-  if (meta.feedBaseUrl !== feedBaseUrl) return true;
-  if (!handles.every((handle) => normalizeHandleKey(handle) in meta.fetchedCounts)) return true;
-  if (meta.lastSyncedAt === null || !Number.isFinite(Date.parse(meta.lastSyncedAt))) return true;
-  return nowMs - Date.parse(meta.lastSyncedAt) >= RECENT_SYNC_SKIP_MS;
-}
-
 let syncAbortController: AbortController | null = null;
 let syncInFlight: Promise<void> | null = null;
 
@@ -355,89 +341,78 @@ async function runExclusiveSync(
   }
 }
 
+const isRecentlySynced = (meta: { lastSyncedAt: string | null }): boolean =>
+  meta.lastSyncedAt !== null
+  && Number.isFinite(Date.parse(meta.lastSyncedAt))
+  && Date.now() - Date.parse(meta.lastSyncedAt) < RECENT_SYNC_SKIP_MS;
+
 /**
- * 频道抓取入口（refreshChannel 调用）。按需分页：
- * - page 1：水位失效/有新关注/距上次同步超 60 秒时，增量拉取全部关注博主
- *   的最新时间线（每博主 count=每页条数）；
- * - page N：缓存卡片不足且仍有博主未取尽时，对未取尽的博主加深请求
- *   （count = page × 每页条数）；缓存充足时纯切片不触网。
+ * 频道抓取入口（refreshChannel 调用）：
+ * - page 1（手动刷新/首次进入）：距上次同步超 60 秒时，逐博主重抓最新批次
+ *   （增量，已知推文按 ID 跳过），新触达仓库批量补全详情；
+ * - page N（加载更多）：缓存不足该页窗口且距上次同步超 60 秒时补一次刷新，
+ *   否则纯切片；每页返回累积前缀（前 page × 20 张卡片，调用方整体替换），
+ *   因为刷新新增的卡片会落进已消费的窗口内，append 切片永远补不到。
  */
 export async function syncXTweetChannel(
   api: GitHubApiService,
   page: number,
   follows: XTweetFollow[],
-  feedBaseUrl: string,
   onStatus: StatusCallback,
+  transport: XTimelineTransport = defaultXTimelineTransport,
 ): Promise<PaginatedDiscoveryRepositories> {
-  const handles = [...new Set(follows.map((follow) => follow.handle).filter(Boolean).map((handle) => handle.trim()))];
+  const handles = [...new Set(
+    follows.map((follow) => follow.handle).filter((handle) => isValidXTweetHandle(handle)),
+  )];
   if (handles.length === 0) {
     return { repos: [], hasMore: false, nextPageIndex: page + 1, totalCount: 0 };
   }
 
-  const targetCount = Math.min(page * X_TWEET_TWEETS_PER_BLOGGER, X_TWEET_MAX_TWEETS_PER_FETCH);
+  const windowEnd = page * X_TWEET_CARD_PAGE_SIZE;
   const meta0 = await xTweetStorage.getSyncMeta();
-  const needsPage1Sync = page <= 1 && shouldRefreshPage1(meta0, handles, feedBaseUrl, Date.now());
-  const needsDeepen = page > 1
-    && canDeepenAnyHandle(meta0, handles)
-    && buildXTweetDiscoveryRepos(
-        await xTweetStorage.getAllTweets(),
-        await xTweetStorage.getAllRepos(),
-        handles,
-      ).length < page * X_TWEET_CARD_PAGE_SIZE;
+  const recent = isRecentlySynced(meta0);
+  let needsSync = page <= 1 && !recent;
+  if (!needsSync && page > 1 && !recent) {
+    const [tweets, repos] = await Promise.all([
+      xTweetStorage.getAllTweets(),
+      xTweetStorage.getAllRepos(),
+    ]);
+    needsSync = buildXTweetDiscoveryRepos(tweets, repos, handles).length < windowEnd;
+  }
 
-  if (needsPage1Sync || needsDeepen) {
+  if (needsSync) {
     await runExclusiveSync(async (signal) => {
       // 上一轮可能已落盘新数据，重读最新状态
       const meta = await xTweetStorage.getSyncMeta();
+      if (isRecentlySynced(meta)) return;
       const tweets = await xTweetStorage.getAllTweets();
       const repos = await xTweetStorage.getAllRepos();
-      // 换实例后旧水位/取尽标记作废，从头拉取
-      const baseUrlChanged = meta.feedBaseUrl !== feedBaseUrl;
-      if (baseUrlChanged) {
-        meta.fetchedCounts = {};
-        meta.exhaustedHandles = [];
-      }
-      meta.feedBaseUrl = feedBaseUrl;
-
-      // 首页刷新探测全部博主（含已取尽的——时间线可能有新推文，feed 返回
-      // 拉满即自动解除取尽）；翻页只加深"未取尽且水位低于目标深度"的博主
-      const fetchHandles = handles.filter((handle) => {
-        if (page <= 1) return true;
-        const key = normalizeHandleKey(handle);
-        return !isExhausted(meta, key) && (meta.fetchedCounts[key] ?? 0) < targetCount;
-      });
 
       const touchedRepoKeys = new Set<string>();
-      let allFeedsFailed = fetchHandles.length > 0;
       let succeeded = 0;
-      for (let i = 0; i < fetchHandles.length; i++) {
+      let firstError: unknown = null;
+      for (const handle of handles) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        const handle = fetchHandles[i];
-        const key = normalizeHandleKey(handle);
-        onStatus?.({ phase: 'syncing', current: succeeded, total: fetchHandles.length });
+        onStatus?.({ phase: 'syncing', current: succeeded, total: handles.length });
         try {
-          const feed = await fetchBloggerFeed(feedBaseUrl, handle, targetCount, signal);
-          const { newTweets, pendingRepoKeys } = ingestFeedTweets(feed, tweets, repos);
+          const html = await transport(handle);
+          const parsed = parseXTimelineHtml(html, handle);
+          const { newTweets, pendingRepoKeys } = ingestFeedTweets(parsed, tweets, repos);
           for (const key of pendingRepoKeys) touchedRepoKeys.add(key);
           await xTweetStorage.saveTweets(newTweets);
           succeeded++;
-          allFeedsFailed = false;
-          // feed 条数不足请求数 → 该博主时间线已取尽；首页拉满则未取尽
-          meta.fetchedCounts[key] = Math.max(meta.fetchedCounts[key] ?? 0, feed.length);
-          if (feed.length < targetCount) {
-            if (!meta.exhaustedHandles.includes(key)) meta.exhaustedHandles.push(key);
-          } else {
-            meta.exhaustedHandles = meta.exhaustedHandles.filter((h) => h.toLowerCase() !== key);
-          }
         } catch (error) {
           if (isAbortError(error)) throw error;
-          // 单个博主失败（实例路由限流/账号不存在）不拖垮整轮，已有缓存照常展示
-          logger.warn('xTweet', `Feed fetch failed for @${handle}`, error);
+          // 单个博主失败（账号不存在/网络抖动）不拖垮整轮，已有缓存照常展示
+          logger.warn('xTweet', `Timeline fetch failed for @${handle}`, error);
+          firstError = firstError ?? error;
         }
-        await sleep(RSS_FETCH_THROTTLE_MS);
+        await sleep(HANDLE_THROTTLE_MS);
       }
-      if (allFeedsFailed && fetchHandles.length > 0) {
-        throw new Error('X feed fetch failed: all followed accounts unavailable');
+      if (succeeded === 0 && handles.length > 0) {
+        throw firstError instanceof Error
+          ? firstError
+          : new Error('X 推文抓取失败：所有博主的时间线均不可达');
       }
       meta.lastSyncedAt = new Date().toISOString();
 
@@ -460,13 +435,32 @@ export async function syncXTweetChannel(
 
   const tweets = await xTweetStorage.getAllTweets();
   const repos = await xTweetStorage.getAllRepos();
-  const meta = await xTweetStorage.getSyncMeta();
   const accumulated = buildXTweetDiscoveryRepos(tweets, repos, handles);
-  const windowEnd = page * X_TWEET_CARD_PAGE_SIZE;
   return {
     repos: accumulated.slice(0, windowEnd),
-    hasMore: canDeepenAnyHandle(meta, handles) || accumulated.length > windowEnd,
+    hasMore: accumulated.length > windowEnd,
     nextPageIndex: page + 1,
     totalCount: accumulated.length,
   };
+}
+
+/** 设置弹窗"测试连接"：真实抓取一位博主主页并解析，返回可验证的结果。 */
+export async function probeXTweetSource(
+  handle: string,
+  transport: XTimelineTransport = defaultXTimelineTransport,
+): Promise<{ ok: boolean; tweetCount?: number; repoCount?: number; error?: string }> {
+  if (!isValidXTweetHandle(handle)) {
+    return { ok: false, error: '无效的用户名' };
+  }
+  try {
+    const html = await transport(handle);
+    const parsed = parseXTimelineHtml(html, handle);
+    return {
+      ok: true,
+      tweetCount: parsed.length,
+      repoCount: parsed.reduce((sum, tweet) => sum + tweet.repoFullNames.length, 0),
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }

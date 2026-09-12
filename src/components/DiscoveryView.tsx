@@ -1051,7 +1051,7 @@ export const DiscoveryView: React.FC = React.memo(() => {
                         {t('X 推文', 'X Tweets')}
                       </p>
                       <p className="text-sm text-muted-foreground dark:text-muted-foreground leading-relaxed">
-                        {t('增量拉取关注博主推文中的 GitHub 项目，加载更多时获取更早的推文', 'Incrementally pulls GitHub projects shared in followed accounts\' tweets; earlier tweets load as you page')}
+                        {t('直连 x.com 抓取关注博主最新推文中的 GitHub 项目，需要桌面版或服务端模式', 'Fetches GitHub projects from followed accounts\' latest tweets on x.com; requires the desktop or server build')}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2">

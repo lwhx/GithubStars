@@ -36,34 +36,14 @@ export interface XStoredRepo {
 
 export interface XTweetSyncMeta {
   lastSyncedAt: string | null;
-  /** 生成水位时使用的 RSSHub 实例地址（换实例后水位作废重拉） */
-  feedBaseUrl: string;
-  /** 各博主已拉取过的推文数（分页水位：第 N 页请求 count = N × 每页条数） */
-  fetchedCounts: Record<string, number>;
-  /** 时间线已取尽的博主（feed 返回条数不足请求 count） */
-  exhaustedHandles: string[];
 }
 
 const DEFAULT_META: XTweetSyncMeta = {
   lastSyncedAt: null,
-  feedBaseUrl: '',
-  fetchedCounts: {},
-  exhaustedHandles: [],
 };
 
 const normalizeMeta = (meta: XTweetSyncMeta | null | undefined): XTweetSyncMeta => ({
   lastSyncedAt: meta?.lastSyncedAt ?? null,
-  feedBaseUrl: typeof meta?.feedBaseUrl === 'string' ? meta.feedBaseUrl : '',
-  fetchedCounts: meta?.fetchedCounts && typeof meta.fetchedCounts === 'object'
-    ? Object.fromEntries(
-        Object.entries(meta.fetchedCounts).filter(
-          (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] >= 0,
-        ),
-      )
-    : {},
-  exhaustedHandles: Array.isArray(meta?.exhaustedHandles)
-    ? meta.exhaustedHandles.filter((handle): handle is string => typeof handle === 'string')
-    : [],
 });
 
 const DB_NAME = 'github-stars-x-tweet';
@@ -264,13 +244,13 @@ export const xTweetStorage = {
   },
 
   async getSyncMeta(): Promise<XTweetSyncMeta> {
-    if (!canUseIndexedDB()) return { ...DEFAULT_META, fetchedCounts: {}, exhaustedHandles: [] };
+    if (!canUseIndexedDB()) return { ...DEFAULT_META };
     try {
       const meta = await withTimeout(runGetTx<XTweetSyncMeta>(META_STORE, 5000, 'sync'), 6000);
       return normalizeMeta(meta);
     } catch (e) {
       console.warn('[xTweetStorage] getSyncMeta failed:', e);
-      return { ...DEFAULT_META, fetchedCounts: {}, exhaustedHandles: [] };
+      return { ...DEFAULT_META };
     }
   },
 

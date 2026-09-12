@@ -111,7 +111,6 @@ export type PersistedAppState = Partial<
     | 'discoverySelectedTopic'
     | 'weeklyOnlyCollected'
     | 'xTweetFollows'
-    | 'xTweetFeedBaseUrl'
     | 'proxyConfig'
     | 'rpcDownloadConfig'
     | 'routeMode'

@@ -1,6 +1,6 @@
 
 import type { AppStoreSlice } from '../types';
-import { normalizeXTweetFeedBaseUrl, normalizeXTweetHandleInput } from '../../utils/xTweetFollows';
+import { normalizeXTweetHandleInput } from '../../utils/xTweetFollows';
 
 export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActions,
   | 'setSelectedDiscoveryChannel'
@@ -27,7 +27,6 @@ export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActi
   | 'setXTweetSyncStatus'
   | 'addXTweetFollow'
   | 'removeXTweetFollow'
-  | 'setXTweetFeedBaseUrl'
   | 'appendDiscoveryRepos'
 >> = (set) => ({
     // Discovery actions
@@ -126,7 +125,6 @@ export const createDiscoverySlice: AppStoreSlice<Pick<import('../types').AppActi
         (follow) => follow.handle.toLowerCase() !== handle.toLowerCase(),
       ),
     })),
-    setXTweetFeedBaseUrl: (url) => set({ xTweetFeedBaseUrl: normalizeXTweetFeedBaseUrl(url) }),
   setDiscoveryScrollPosition: (channel, position) => set((state) => ({
       discoveryScrollPositions: { ...state.discoveryScrollPositions, [channel]: position },
     })),

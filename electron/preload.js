@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setProxy: (config) => ipcRenderer.invoke('set-proxy', config),
   getProxy: () => ipcRenderer.invoke('get-proxy'),
   testProxy: (config) => ipcRenderer.invoke('test-proxy', config),
+  xFetchTimeline: (handle) => ipcRenderer.invoke('x-fetch-timeline', handle),
   desktop: {
     getPrefs: () => ipcRenderer.invoke('desktop:getPrefs'),
     setAutoLaunch: (enabled) => ipcRenderer.invoke('desktop:setAutoLaunch', enabled),

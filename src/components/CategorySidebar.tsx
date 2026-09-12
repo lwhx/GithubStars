@@ -7,9 +7,11 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
+  Undo2,
 } from 'lucide-react';
 import { Category, Repository } from '../types';
 import { useAppStore, getAllCategories, sortCategoriesByOrder } from '../store/useAppStore';
+import { useRepositoryDragStore } from '../store/useRepositoryDragStore';
 import { useShallow } from 'zustand/react/shallow';
 import { CategoryEditModal } from './CategoryEditModal';
 import { useCategorySyncActions } from '../features/repositories/hooks/useCategorySyncActions';
@@ -59,6 +61,8 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
 
   const { toast, confirm } = useDialog();
   const { forceSyncToBackend } = useCategorySyncActions();
+  // 仓库卡片拖拽中：驱动「全部分类」变为「取消分类」热区提示
+  const isRepoDragging = useRepositoryDragStore((state) => state.isDragging);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -286,16 +290,46 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
       justDroppedRef.current = false;
     }, 300);
 
-    if (category.id === 'all') return;
+    // drop 先于 dragend 派发；若当前正处于某分类视图，源卡片即将因分类变更
+    // 从列表卸载，其 React dragend 将丢失，这里显式复位拖拽状态（issue #353）
+    useRepositoryDragStore.getState().endDrag();
 
     const repoId = event.dataTransfer.getData('application/x-gsm-repository-id');
     const repository = repositoryMap.get(repoId);
     if (!repository) return;
 
+    const allCategoriesList = getAllCategories(customCategories, language, hiddenDefaultCategoryIds, defaultCategoryOverrides);
+
+    // 拖到「全部分类」= 取消分类：显式清空（''），与编辑弹窗清空分类的结果一致；
+    // resolveCategoryAssignment 会保留显式清空，后续 AI 重新分析不会重新归类
+    if (category.id === 'all') {
+      // 已显式清空过的仓库无需再写
+      if (repository.custom_category === '') return;
+      // 无锁定分类且 AI/默认分类均未命中时，仓库本就无归属：
+      // 写入 '' 会被 resolveCategoryAssignment 永久保留，阻止后续 AI 重新归类，故 no-op
+      const hasAssignedCategory = !!repository.custom_category ||
+        !!(getAICategory(repository, allCategoriesList) || getDefaultCategory(repository, allCategoriesList));
+      if (!hasAssignedCategory) return;
+
+      const originalRepo = { ...repository };
+      const nextRepo = {
+        ...repository,
+        custom_category: '',
+        category_locked: false,
+        last_edited: new Date().toISOString(),
+      };
+      updateRepository(nextRepo);
+
+      try {
+        await forceSyncToBackend();
+      } catch {
+        handleSyncError(originalRepo);
+      }
+      return;
+    }
+
     const originalRepo = { ...repository };
 
-    // 获取所有分类用于计算AI和默认分类
-    const allCategoriesList = getAllCategories(customCategories, language, hiddenDefaultCategoryIds, defaultCategoryOverrides);
     const aiCat = getAICategory(repository, allCategoriesList);
     const defaultCat = getDefaultCategory(repository, allCategoriesList);
 
@@ -355,13 +389,14 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
               const count = getCategoryCount(category);
               const isSelected = selectedCategory === category.id;
               const isDragTarget = dragOverCategoryId === category.id;
+              // 拖拽仓库时「全部分类」变为「取消分类」拖放热区
+              const isUncategorizeHotspot = category.id === 'all' && isRepoDragging;
 
               return (
                 <div
                   key={category.id}
                   className="group shrink-0"
                   onDragOver={(event) => {
-                    if (category.id === 'all') return;
                     event.preventDefault();
                     setDragOverCategoryId(category.id);
                   }}
@@ -377,27 +412,39 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                     onClick={() => handleCategoryClick(category.id)}
                     size="sm"
                     className={`relative flex min-w-[140px] items-center justify-between rounded-md text-left transition-colors ${
-                      isSelected
-                        ? 'bg-accent text-accent-foreground font-medium'
-                        : isDragTarget
-                          ? 'bg-success/10 text-success ring-1 ring-success/40'
-                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      isDragTarget
+                        ? isUncategorizeHotspot
+                          ? 'bg-warning/10 text-warning ring-1 ring-warning/40'
+                          : 'bg-success/10 text-success ring-1 ring-success/40'
+                        : isUncategorizeHotspot
+                          ? 'border border-dashed border-warning/50 bg-warning/5 text-warning'
+                          : isSelected
+                            ? 'bg-accent text-accent-foreground font-medium'
+                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                     }`}
-                    title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : undefined}
+                    title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : (isUncategorizeHotspot ? t('拖到这里取消分类', 'Drop here to remove category') : undefined)}
                     aria-pressed={isSelected}
                     aria-current={isSelected ? 'page' : undefined}
                   >
                     <div className="flex items-center space-x-3 min-w-0 flex-1">
-                      <span className="text-base flex-shrink-0">{category.icon}</span>
-                      <span className="text-sm font-medium truncate">{category.name}</span>
+                      <span className="text-base flex-shrink-0">
+                        {isUncategorizeHotspot ? <Undo2 className="h-4 w-4" /> : category.icon}
+                      </span>
+                      <span className="text-sm font-medium truncate">
+                        {isUncategorizeHotspot ? t('取消分类', 'Uncategorize') : category.name}
+                      </span>
                     </div>
                     <span
                       className={`shrink-0 rounded-md px-2 py-0.5 text-xs ${
-                        isSelected
-                          ? 'bg-primary text-primary-foreground'
-                          : isDragTarget
-                            ? 'bg-success/10 text-success'
-                            : 'bg-muted text-muted-foreground'
+                        isDragTarget
+                          ? isUncategorizeHotspot
+                            ? 'bg-warning/10 text-warning'
+                            : 'bg-success/10 text-success'
+                          : isUncategorizeHotspot
+                            ? 'bg-warning/10 text-warning'
+                            : isSelected
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       {count}
@@ -455,12 +502,12 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                     return displayCategories.map((category) => {
                       const isSelected = selectedCategory === category.id;
                       const isDragTarget = dragOverCategoryId === category.id;
+                      const isUncategorizeHotspot = category.id === 'all' && isRepoDragging;
                       return (
                         <div
                           key={category.id}
                           className="group relative"
                           onDragOver={(event) => {
-                            if (category.id === 'all') return;
                             event.preventDefault();
                             setDragOverCategoryId(category.id);
                           }}
@@ -477,16 +524,20 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                             aria-pressed={isSelected}
                             size="icon"
                             className={`h-8 w-8 rounded-md text-lg transition-all duration-200 ${
-                              isSelected
-                                ? 'bg-accent text-accent-foreground font-medium'
-                                : isDragTarget
-                                  ? 'bg-success/10 text-success ring-1 ring-success/40'
-                                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                              isDragTarget
+                                ? isUncategorizeHotspot
+                                  ? 'bg-warning/10 text-warning outline outline-dashed outline-1 outline-warning/50'
+                                  : 'bg-success/10 text-success ring-1 ring-success/40'
+                                : isUncategorizeHotspot
+                                  ? 'text-warning outline outline-dashed outline-1 outline-warning/50'
+                                  : isSelected
+                                    ? 'bg-accent text-accent-foreground font-medium'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                             }`}
-                            title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : category.name}
-                            aria-label={category.name}
+                            title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : (isUncategorizeHotspot ? t('取消分类 — 拖到这里取消仓库的分类', 'Uncategorize — drop here to remove category') : category.name)}
+                            aria-label={isUncategorizeHotspot ? t('取消分类', 'Uncategorize') : category.name}
                           >
-                            {category.icon}
+                            {isUncategorizeHotspot ? <Undo2 className="h-4 w-4" /> : category.icon}
                           </Button>
                         </div>
                       );
@@ -555,6 +606,8 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                     const count = getCategoryCount(category);
                     const isSelected = selectedCategory === category.id;
                     const isDragTarget = dragOverCategoryId === category.id;
+                    // 拖拽仓库时「全部分类」变为「取消分类」拖放热区
+                    const isUncategorizeHotspot = category.id === 'all' && isRepoDragging;
 
                     return (
                       <div
@@ -564,7 +617,6 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                           transitionDelay: showText ? `${Math.min(index * 30, 300)}ms` : '0ms',
                         }}
                         onDragOver={(event) => {
-                          if (category.id === 'all') return;
                           event.preventDefault();
                           setDragOverCategoryId(category.id);
                         }}
@@ -581,33 +633,43 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
                           aria-pressed={isSelected}
                           size="sm"
                           className={`flex h-9 w-full items-center justify-between rounded-md text-left transition-[color,background-color,border-color,opacity,transform] duration-200 ease-out pr-3 ${
-                            isSelected
-                              ? 'bg-accent text-accent-foreground font-medium'
-                              : isDragTarget
-                                ? 'bg-success/10 text-success ring-1 ring-success/40'
-                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                            isDragTarget
+                              ? isUncategorizeHotspot
+                                ? 'bg-warning/10 text-warning ring-1 ring-warning/40'
+                                : 'bg-success/10 text-success ring-1 ring-success/40'
+                              : isUncategorizeHotspot
+                                ? 'border border-dashed border-warning/50 bg-warning/5 text-warning'
+                                : isSelected
+                                  ? 'bg-accent text-accent-foreground font-medium'
+                                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                           } ${showText ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-3'}`}
-                          title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : undefined}
+                          title={category.id !== 'all' ? category.name + " — " + t('可将仓库卡片拖到这里快速改分类', 'Drag repository cards here to quickly change category') : (isUncategorizeHotspot ? t('取消分类 — 拖到这里取消仓库的分类', 'Uncategorize — drop here to remove category') : undefined)}
                         >
                           <div className="flex items-center space-x-3 min-w-0 flex-1">
-                            <span className="text-base flex-shrink-0">{category.icon}</span>
+                            <span className="text-base flex-shrink-0">
+                              {isUncategorizeHotspot ? <Undo2 className="h-4 w-4" /> : category.icon}
+                            </span>
                             <span
                               className={`text-sm font-medium truncate transition-[opacity,transform] duration-200 ease-out ${
                                 showText ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2'
                               }`}
                             >
-                              {category.name}
+                              {isUncategorizeHotspot ? t('取消分类', 'Uncategorize') : category.name}
                             </span>
                           </div>
 
                           {/* 数字 badge - 正常状态显示，hover/focus-within 时隐藏 */}
                           <span
                               className={`ml-auto flex min-w-8 shrink-0 justify-center rounded-md px-2 py-0.5 text-xs transition-[color,background-color,border-color,opacity,transform] duration-200 ease-out ${
-                              isSelected
-                                ? 'bg-primary text-primary-foreground'
-                                : isDragTarget
-                                  ? 'bg-success/20 text-success'
-                                  : 'bg-muted text-muted-foreground'
+                              isDragTarget
+                                ? isUncategorizeHotspot
+                                  ? 'bg-warning/20 text-warning'
+                                  : 'bg-success/20 text-success'
+                                : isUncategorizeHotspot
+                                  ? 'bg-warning/20 text-warning'
+                                  : isSelected
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-muted text-muted-foreground'
                             } ${showText ? 'opacity-100 scale-100' : 'opacity-0 scale-75'} group-hover:opacity-0 group-focus-within:opacity-0`}
                           >
                             {count}

@@ -166,24 +166,26 @@ unbanned because `BilingualMarkdownRenderer`, `UpdateChecker`, and `UpdateNotifi
 still imported them directly. That phase is complete: PR #326 migrated the last three
 components and folded both services into the ban list, and the allowlist no longer exists.
 
-### Phased enforcement
+### Phased enforcement (historical — completed in PR #326)
+
+The rollout was phased so that enforcement never masked a pile of pre-existing violations. This
+section records those mechanics; the phase is over and the allowlist no longer exists.
 
 PR 4–8 migrated the high-traffic components (`RepositoryCard`, `RepositoryList`, the settings
 panels, the timeline views). A snapshot at the `7337df0` baseline showed 33 components importing
-services; after the migration that number is down, but a tail of components (e.g.
+services; a tail of components (e.g.
 `SearchBar`, `ReadmeModal`, `LoginScreen`, `GistCard`, `ReleaseCard`, `SubscriptionRepoCard`,
 `CategorySidebar`, `RepositoryEditModal`, `DebugModeIndicator`, `SettingsPanel`,
-`ReleaseSourceSettingsModal`, `GistEditorModal`, `GistDetailModal`) still import business
+`ReleaseSourceSettingsModal`, `GistEditorModal`, `GistDetailModal`) still imported business
 services directly.
 
-PR 9 enforces the rule only on **already-migrated** component directories and the
-`src/components/ui/**` primitives (which should never touch a business service), and leaves the
-un-migrated tail on an explicit allowlist for a later PR. One-shot banning all remaining imports
-would light up a dozen files at once and force a rushed migration in a boundary-PR — exactly the
-"don't mask 33 violations in one go" failure mode. The allowlist is the phasing mechanism; each
-later PR that migrates a tail component also removes it from the allowlist.
-
-*(Completed: the tail was migrated and the allowlist retired in PR #326.)*
+PR 9 therefore enforced the rule only on **already-migrated** component directories and the
+`src/components/ui/**` primitives (which should never touch a business service), leaving the
+un-migrated tail on an explicit allowlist: one-shot banning all remaining imports would have
+forced a rushed migration in a boundary-PR — exactly the
+"don't mask 33 violations in one go" failure mode. Each later PR migrated a tail component and
+removed it from the allowlist, until PR #326 migrated the last three, folded `updateService` and
+`translateService` into the ban list, and emptied the allowlist.
 
 ## Consequences
 
@@ -194,9 +196,6 @@ later PR that migrates a tail component also removes it from the allowlist.
 - A `use*.ts(x)` module placed at a feature's root directory fails the `check-boundaries.cjs`
   CI step.
 - A reviewer can point at this ADR instead of re-arguing the layering on every PR.
-
-*(The allowlist-as-technical-debt mechanism described in the original decision ran its course:
-PR #326 migrated the tail and emptied the allowlist, so no entries remain.)*
 
 ## Open issues / follow-up
 

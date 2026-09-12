@@ -415,27 +415,31 @@ export async function syncXTweetChannel(
       for (const handle of handles) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         onStatus?.({ phase: 'syncing', current: succeeded, total: handles.length });
+        // 抓取/解析失败只跳过该博主（账号不存在/网络抖动不拖垮整轮）
+        let parsed: XStoredTweet[];
         try {
           const html = await transport(handle);
-          const parsed = parseXTimelineHtml(html, handle);
-          const { newTweets, pendingRepoKeys } = ingestFeedTweets(parsed, tweets, repos);
-          for (const key of pendingRepoKeys) touchedRepoKeys.add(key);
-          // 逐博主原子落盘（推文+仓库同一事务，水位此时不推进）：
-          // 中途中止不丢已抓批次，写失败则整批回滚、下轮重抓
-          await xTweetStorage.saveSyncBatch({
-            tweets: newTweets,
-            repos: [...touchedRepoKeys]
-              .map((key) => repos.get(key))
-              .filter((repo): repo is XStoredRepo => Boolean(repo)),
-            meta,
-          });
-          succeeded++;
+          parsed = parseXTimelineHtml(html, handle);
         } catch (error) {
           if (isAbortError(error)) throw error;
-          // 单个博主失败（账号不存在/网络抖动）不拖垮整轮，已有缓存照常展示
           logger.warn('xTweet', `Timeline fetch failed for @${handle}`, error);
           firstError = firstError ?? error;
+          await sleep(HANDLE_THROTTLE_MS);
+          continue;
         }
+        const { newTweets, pendingRepoKeys } = ingestFeedTweets(parsed, tweets, repos);
+        for (const key of pendingRepoKeys) touchedRepoKeys.add(key);
+        // 逐博主原子落盘（推文+仓库同一事务，水位此时不推进）。
+        // 写失败必须上抛中止整轮：内存合并态（tweets/原贴指针）无法安全
+        // 回滚，带着脏状态继续会让未持久化的合并混入末轮落盘
+        await xTweetStorage.saveSyncBatch({
+          tweets: newTweets,
+          repos: [...touchedRepoKeys]
+            .map((key) => repos.get(key))
+            .filter((repo): repo is XStoredRepo => Boolean(repo)),
+          meta,
+        });
+        succeeded++;
         await sleep(HANDLE_THROTTLE_MS);
       }
       if (succeeded === 0 && handles.length > 0) {

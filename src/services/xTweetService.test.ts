@@ -31,14 +31,20 @@ const storage = vi.hoisted(() => {
   const tweetsStore = new Map<string, unknown>();
   const reposStore = new Map<string, unknown>();
   const metaRef = { current: { lastSyncedAt: null as string | null } };
+  let failSyncBatchOnRepo: string | null = null;
   return {
     tweetsStore,
     reposStore,
     metaRef,
+    setFailSyncBatchOnRepo(fullName: string | null) {
+      failSyncBatchOnRepo = fullName;
+    },
+    failSyncBatchOnRepoNow: () => failSyncBatchOnRepo,
     reset() {
       tweetsStore.clear();
       reposStore.clear();
       metaRef.current = { lastSyncedAt: null };
+      failSyncBatchOnRepo = null;
     },
   };
 });
@@ -58,6 +64,11 @@ vi.mock('./xTweetStorage', () => ({
       storage.metaRef.current = { ...meta };
     },
     saveSyncBatch: async (payload: { tweets: XStoredTweet[]; repos: XStoredRepo[]; meta: XTweetSyncMeta }) => {
+      // 原子语义在真实现由单事务保证；替身以"先抛错后应用"模拟失败回滚
+      if (storage.failSyncBatchOnRepoNow()
+        && payload.repos.some((repo) => repo.fullName.toLowerCase() === storage.failSyncBatchOnRepoNow())) {
+        throw new Error('sync batch tx failed');
+      }
       for (const tweet of payload.tweets) storage.tweetsStore.set(tweet.tweetId, tweet);
       for (const repo of payload.repos) storage.reposStore.set(repo.fullName.toLowerCase(), repo);
       storage.metaRef.current = { ...payload.meta };
@@ -343,6 +354,33 @@ describe('syncXTweetChannel', () => {
     const page2 = await syncXTweetChannel(api, 2, follows.slice(0, 1), undefined, transport);
     expect(page2.repos.length).toBeGreaterThan(X_TWEET_CARD_PAGE_SIZE);
     expect(page2.hasMore).toBe(false);
+  });
+});
+
+describe('落盘失败传播', () => {
+  it('第一个博主落盘成功、第二个博主写失败时中止整轮：不持久化缺原贴的仓库，也不推进水位', async () => {
+    const ghostHtml = [
+      'client:urt:server:TimelineTimelineEntry:tweet-8888888888888888888:content',
+      'client:VHdlZXQ6' + Buffer.from('Tweet:8888888888888888888').toString('base64').slice(8) + ':details',
+      'full_text:"repo https://github.com/ghost/repo"',
+      'expanded_url:"https://github.com/ghost/repo"',
+    ].join(' ');
+    const { transport } = stubTransport({ geekbb: REAL_TIMELINE_HTML, ghost: ghostHtml });
+    const api = makeApi(new Map([['obsidianmd/knap', makeDetail('obsidianmd/knap')]]));
+    // 第二批（含 ghost/repo 的落盘）写失败
+    storage.setFailSyncBatchOnRepo('ghost/repo');
+
+    await expect(
+      syncXTweetChannel(api, 1, follows, undefined, transport),
+    ).rejects.toThrow('sync batch tx failed');
+
+    // 首批（geekbb）已原子持久化且原贴齐全；ghost 的脏合并未混入
+    expect(storage.reposStore.has('ghost/repo')).toBe(false);
+    for (const [key, repo] of storage.reposStore) {
+      expect(storage.tweetsStore.has((repo as XStoredRepo).sourceTweetId)).toBe(true);
+      expect(key.length).toBeGreaterThan(0);
+    }
+    expect(storage.metaRef.current.lastSyncedAt).toBeNull();
   });
 });
 
